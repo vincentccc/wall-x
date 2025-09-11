@@ -415,7 +415,7 @@ class Timers:
             str: Formatted string with the timer values.
         """
 
-        if names == None:  # get all registered timers
+        if names is None:  # get all registered timers
             names = list(self._timers.keys())
 
         assert normalizer > 0.0

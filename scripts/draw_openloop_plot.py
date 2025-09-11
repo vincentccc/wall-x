@@ -1,6 +1,7 @@
 import os
 import yaml
 import torch
+import matplotlib.pyplot as plt
 from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import Qwen2_5_VLMoEForAction
 from wall_x.data.load_lerobot_dataset import load_test_dataset, get_data_configs
 
@@ -67,8 +68,6 @@ gt_traj_np = gt_traj.numpy()
 pred_traj_np = pred_traj.numpy()
 
 timesteps = gt_traj.shape[0]
-
-import matplotlib.pyplot as plt
 
 fig, axs = plt.subplots(action_dim, 1, figsize=(15, 5 * action_dim), sharex=True)
 fig.suptitle("Action Comparison for lerobot", fontsize=16)

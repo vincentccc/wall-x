@@ -207,7 +207,6 @@ class PermuteMoE_topK(torch.autograd.Function):
             warnings.warn(
                 "The input `indices` of permute_topK op is on the device: CPU!"
             )
-            expert_for_rows = expert_for_rows.cuda()
 
         # Shape check
         if input_act.size(0) != indices.size(0):

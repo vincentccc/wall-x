@@ -781,7 +781,7 @@ class QwenVlAct_Trainer:
                     new_key = "module." + key
                 new_state_dict[new_key] = state_dict[key]
 
-            err = self.model.load_state_dict(new_state_dict, strict=False)
+            self.model.load_state_dict(new_state_dict, strict=False)
         else:
             # Load full checkpoint including optimizer and scheduler states
             self.accelerator.load_state(checkpoint_path)

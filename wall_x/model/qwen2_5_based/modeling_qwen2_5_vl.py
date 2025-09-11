@@ -33,9 +33,11 @@ from wall_x.fusions import ops
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_varlen_func
     from flash_attn.layers.rotary import apply_rotary_emb
+    from flash_attn import flash_attn_func
 else:
     flash_attn_varlen_func = None
     apply_rotary_emb = None
+    flash_attn_func = None
 
 
 if is_flash_attn_2_available():
@@ -910,9 +912,6 @@ class Qwen2_5_VLAttention(nn.Module):
             attn_weights = None
 
         return attn_output, attn_weights, past_key_value
-
-
-from flash_attn import flash_attn_func
 
 
 class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):

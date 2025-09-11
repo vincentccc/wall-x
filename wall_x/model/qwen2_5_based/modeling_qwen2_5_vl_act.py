@@ -1346,10 +1346,6 @@ class Qwen2_5_VLMoEForAction(Qwen2_5_VLForConditionalGeneration):
                 # Dummy forward pass to ensure gradient registration in DDP
                 # This handles cases where one process has proprioception data while another doesn't
                 # Without this, DDP would hang waiting for a gradient that will never be computed
-                dummy_output = sum(
-                    p.sum()
-                    for p in self.action_preprocessor.proprioception_proj.parameters()
-                )
                 dummy_input = torch.randn(
                     2,
                     self.action_preprocessor.propri_dim * 2,
