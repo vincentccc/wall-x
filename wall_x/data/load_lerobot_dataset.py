@@ -8,7 +8,12 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from typing import Protocol, SupportsIndex, TypeVar
 from qwen_vl_utils.vision_process import smart_resize
 from wall_x.data.config import X2RDataProcessingConfig
-from wall_x.data.utils import process_grounding_points, get_wallx_normal_text, replace_action_token, preprocesser_call
+from wall_x.data.utils import (
+    process_grounding_points,
+    get_wallx_normal_text,
+    replace_action_token,
+    preprocesser_call,
+)
 
 from transformers import AutoProcessor
 
@@ -67,7 +72,9 @@ class PreprocessedDataset(Dataset[T_co]):
             img_pil = Image.fromarray((current_obs * 255).to(torch.uint8).cpu().numpy())
             orig_width, orig_height = img_pil.size
             # 2. Apply resolution constraints (if config is not -1)
-            target_size = self.data_config.resolution.get(self._cam_key_mapping[key], -1)
+            target_size = self.data_config.resolution.get(
+                self._cam_key_mapping[key], -1
+            )
             if target_size != -1:
                 # Maintain aspect ratio logic
                 if orig_width > orig_height:  # Landscape image
@@ -108,7 +115,9 @@ class PreprocessedDataset(Dataset[T_co]):
             self._cam_key_mapping,
             generate_subtask_ratio=generate_subtask_ratio,
         )
-        text = process_grounding_points(complete_text, h, w, resize_h, resize_w, self.data_config.model_type)
+        text = process_grounding_points(
+            complete_text, h, w, resize_h, resize_w, self.data_config.model_type
+        )
         result = {
             "image_inputs": image_inputs,
             "text": text,
@@ -150,7 +159,9 @@ class PreprocessedDataset(Dataset[T_co]):
             batch_size=batch_size,
             sampler=sampler,  # Use distributed sampler instead of shuffle=True
             num_workers=num_workers,
-            collate_fn=DataCollator(self.config, self.dataload_config, self._dataset.meta.stats),
+            collate_fn=DataCollator(
+                self.config, self.dataload_config, self._dataset.meta.stats
+            ),
             pin_memory=True,  # Enable for GPU training
             persistent_workers=num_workers > 0,  # Only if num_workers > 0
             prefetch_factor=2,  # Reduce memory usage
@@ -164,7 +175,9 @@ class PreprocessedDataset(Dataset[T_co]):
         Get distributed evaluation dataloader (no shuffling for consistent evaluation)
         """
 
-        batch_size = self.config.get("eval_batch_size_per_gpu", self.config.get("batch_size_per_gpu", 8))
+        batch_size = self.config.get(
+            "eval_batch_size_per_gpu", self.config.get("batch_size_per_gpu", 8)
+        )
         num_workers = self.config.get("num_workers", 4)
 
         # Create distributed sampler for evaluation (no shuffle)
@@ -181,7 +194,9 @@ class PreprocessedDataset(Dataset[T_co]):
             batch_size=batch_size,
             sampler=sampler,
             num_workers=num_workers,
-            collate_fn=DataCollator(self.config, self.dataload_config, self._dataset.meta.stats),
+            collate_fn=DataCollator(
+                self.config, self.dataload_config, self._dataset.meta.stats
+            ),
             pin_memory=True,
             persistent_workers=num_workers > 0,
             prefetch_factor=2,
@@ -212,19 +227,30 @@ class DataCollator:
 
         # Use cached processors if available
         if processor_path not in self._processor_cache:
-            self._processor_cache[processor_path] = AutoProcessor.from_pretrained(processor_path, use_fast=True)
+            self._processor_cache[processor_path] = AutoProcessor.from_pretrained(
+                processor_path, use_fast=True
+            )
             if self.config.get("padding_side", "left") == "left":
                 self._processor_cache[processor_path].tokenizer.padding_side = "left"
 
-        if self.use_fast_tokenizer and action_tokenizer_path not in self._action_tokenizer_cache:
-            self._action_tokenizer_cache[action_tokenizer_path] = AutoProcessor.from_pretrained(action_tokenizer_path, trust_remote_code=True)
+        if (
+            self.use_fast_tokenizer
+            and action_tokenizer_path not in self._action_tokenizer_cache
+        ):
+            self._action_tokenizer_cache[action_tokenizer_path] = (
+                AutoProcessor.from_pretrained(
+                    action_tokenizer_path, trust_remote_code=True
+                )
+            )
 
         self.processor = self._processor_cache[processor_path]
 
         if not self.use_fast_tokenizer:
             self.train_action_tokenizer = None
         else:
-            self.train_action_tokenizer = self._action_tokenizer_cache[action_tokenizer_path]
+            self.train_action_tokenizer = self._action_tokenizer_cache[
+                action_tokenizer_path
+            ]
 
         if self.use_fast_tokenizer:
             self.action_mapper = {}
@@ -254,9 +280,27 @@ class DataCollator:
                 agent_pos.nan_to_num_(nan=0.0)
                 agent_pos = self._normalize(agent_pos, self.min_stat, self.delta)
                 if agent_pos.shape[-1] != 20:
-                    agent_pos = torch.cat([agent_pos, torch.zeros(agent_pos.shape[0], agent_pos.shape[1], 20 - agent_pos.shape[-1])], dim=-1)
+                    agent_pos = torch.cat(
+                        [
+                            agent_pos,
+                            torch.zeros(
+                                agent_pos.shape[0],
+                                agent_pos.shape[1],
+                                20 - agent_pos.shape[-1],
+                            ),
+                        ],
+                        dim=-1,
+                    )
                     agent_pos_mask = torch.cat(
-                        [agent_pos_mask, torch.zeros(agent_pos_mask.shape[0], agent_pos_mask.shape[1], 20 - agent_pos_mask.shape[-1])], dim=-1
+                        [
+                            agent_pos_mask,
+                            torch.zeros(
+                                agent_pos_mask.shape[0],
+                                agent_pos_mask.shape[1],
+                                20 - agent_pos_mask.shape[-1],
+                            ),
+                        ],
+                        dim=-1,
                     )
                 additional_inputs["proprioception"] = agent_pos
                 additional_inputs["agent_pos_mask"] = agent_pos_mask
@@ -268,18 +312,42 @@ class DataCollator:
                 action.nan_to_num_(nan=0.0)
                 action = self._normalize(action, self.min_stat, self.delta)
                 if action.shape[-1] != 20:
-                    action = torch.cat([action, torch.zeros(action.shape[0], action.shape[1], 20 - action.shape[-1])], dim=-1)
-                    dof_mask = torch.cat([dof_mask, torch.zeros(dof_mask.shape[0], dof_mask.shape[1], 20 - dof_mask.shape[-1])], dim=-1)
+                    action = torch.cat(
+                        [
+                            action,
+                            torch.zeros(
+                                action.shape[0], action.shape[1], 20 - action.shape[-1]
+                            ),
+                        ],
+                        dim=-1,
+                    )
+                    dof_mask = torch.cat(
+                        [
+                            dof_mask,
+                            torch.zeros(
+                                dof_mask.shape[0],
+                                dof_mask.shape[1],
+                                20 - dof_mask.shape[-1],
+                            ),
+                        ],
+                        dim=-1,
+                    )
                 additional_inputs["action_chunk"] = action
                 additional_inputs["dof_mask"] = dof_mask
             elif key == "image_inputs":
-                additional_inputs["image_inputs"] = [item["image_inputs"] for item in batch]
+                additional_inputs["image_inputs"] = [
+                    item["image_inputs"] for item in batch
+                ]
             elif key == "text":
                 additional_inputs["text"] = [item["text"] for item in batch]
             elif key == "frame_index":
-                additional_inputs["frame_index"] = torch.stack([item["frame_index"] for item in batch])
+                additional_inputs["frame_index"] = torch.stack(
+                    [item["frame_index"] for item in batch]
+                )
             else:
-                raise NotImplementedError(f"{key} input not implemented in preprocesser")
+                raise NotImplementedError(
+                    f"{key} input not implemented in preprocesser"
+                )
 
         additional_inputs["text"] = replace_action_token(
             additional_inputs["text"],
@@ -342,20 +410,27 @@ def load_lerobot_data(
 
     delta_timestamps = {
         # action chunk
-        "action": [t / dataset_fps for t in range(dataload_config.get("action_horizon", 32) - 1)],
+        "action": [
+            t / dataset_fps
+            for t in range(dataload_config.get("action_horizon", 32) - 1)
+        ],
     }
     batch_size = config.get("batch_size_per_gpu", 8)
 
     # repo_id = "lerobot/aloha_mobile_cabinet"
     repo_id = lerobot_config.get("repo_id", "lerobot/aloha_mobile_cabinet")
-    dataset = LeRobotDataset(repo_id, delta_timestamps=delta_timestamps, video_backend="pyav")
+    dataset = LeRobotDataset(
+        repo_id, delta_timestamps=delta_timestamps, video_backend="pyav"
+    )
 
     if rank == 0:
         print(f"Selected episodes: {dataset.episodes}")
         print(f"Number of episodes selected: {dataset.num_episodes}")
         print(f"Number of frames selected: {dataset.num_frames}")
 
-    dataset = PreprocessedDataset(dataset, config, dataload_config, seed=seed, rank=rank, world_size=world_size)
+    dataset = PreprocessedDataset(
+        dataset, config, dataload_config, seed=seed, rank=rank, world_size=world_size
+    )
 
     # Calculate samples per process
     if world_size > 1:
@@ -385,7 +460,9 @@ def load_lerobot_data(
     return dataset, train_num
 
 
-def get_distributed_dataloader(dataset, config, rank=0, world_size=1, seed=42, is_train=True):
+def get_distributed_dataloader(
+    dataset, config, rank=0, world_size=1, seed=42, is_train=True
+):
     """
     Helper function to get distributed dataloader
 
@@ -429,23 +506,29 @@ def get_data_configs(config):
 
     return data_config
 
+
 class TestDataset(PreprocessedDataset):
     def __init__(self, dataset, config, dataload_config, seed=42):
-        super().__init__(dataset, config, dataload_config, seed=seed, rank=0, world_size=1)
+        super().__init__(
+            dataset, config, dataload_config, seed=seed, rank=0, world_size=1
+        )
 
     def get_dataloader(self):
         """
         Get distributed evaluation dataloader (no shuffling for consistent evaluation)
         """
-        
+
         dataloader = torch.utils.data.DataLoader(
             self,
             batch_size=1,
-            collate_fn=DataCollator(self.config, self.dataload_config, self._dataset.meta.stats),
+            collate_fn=DataCollator(
+                self.config, self.dataload_config, self._dataset.meta.stats
+            ),
         )
 
         return dataloader
-    
+
+
 def load_test_dataset(
     config,
     lerobot_config,
@@ -471,16 +554,24 @@ def load_test_dataset(
 
     delta_timestamps = {
         # action chunk
-        "action": [t / dataset_fps for t in range(dataload_config.get("action_horizon", 32) - 1)],
+        "action": [
+            t / dataset_fps
+            for t in range(dataload_config.get("action_horizon", 32) - 1)
+        ],
     }
 
     repo_id = lerobot_config.get("repo_id", "lerobot/aloha_mobile_cabinet")
-    dataset = LeRobotDataset(repo_id, episodes=[episode], delta_timestamps=delta_timestamps, video_backend="pyav")
+    dataset = LeRobotDataset(
+        repo_id,
+        episodes=[episode],
+        delta_timestamps=delta_timestamps,
+        video_backend="pyav",
+    )
 
     print(f"Selected episodes: {dataset.episodes}")
     print(f"Number of episodes selected: {dataset.num_episodes}")
     print(f"Number of frames selected: {dataset.num_frames}")
-    
+
     dataset = TestDataset(dataset, config, dataload_config, seed=seed)
-    
+
     return dataset

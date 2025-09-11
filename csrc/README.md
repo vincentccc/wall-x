@@ -10,7 +10,7 @@ High-performance CUDA kernels for accelerating model training.
 
 ### Token Permutation
 - `permute`: Token permutation for MoE routing
-- `unpermute`: Token recovery after expert computation  
+- `unpermute`: Token recovery after expert computation
 - `unpermute_bwd`: Backward pass for token recovery
 
 ### Multimodal RoPE

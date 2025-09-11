@@ -22,7 +22,7 @@
 </div>
 
 ## Building General-Purpose Robots Based on Embodied Foundation Model
-We are building the embodied foundation model to capture and compress the world's most valuable data: the continuous, high-fidelity stream of physical interaction. 
+We are building the embodied foundation model to capture and compress the world's most valuable data: the continuous, high-fidelity stream of physical interaction.
 
 By creating a direct feedback loop between the model's decisions and the body's lived experience, we enable the emergence of a truly generalizable intelligence—one that understands not just how the world works, but how to act effectively within it.
 

@@ -60,7 +60,7 @@ agent_pos_config:
 # Data configuration
 data:
   use_lerobot: true
-  
+
   # LeRobot dataset configuration
   lerobot_config:
     repo_id: "lerobot/aloha_mobile_cabinet"
@@ -73,10 +73,10 @@ data:
     force_cache_sync: false
     download_videos: true
     video_backend: null
-  
+
   action_horizon: 32
   train_test_split: 0.95
-  
+
   # Action keys for observation and prediction
   obs_action_keys:
     - follow_left_ee_cartesian_pos
@@ -88,7 +88,7 @@ data:
     - head_actions
     - height
     - car_pose
-  
+
   predict_action_keys:
     - follow_left_ee_cartesian_pos
     - follow_left_ee_rotation
@@ -99,7 +99,7 @@ data:
     - head_actions
     - height
     - car_pose
-  
+
   # Image resolution configuration for different camera views
   resolution:
     face_view: 256

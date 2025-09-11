@@ -21,4 +21,4 @@ export SCRIPT_ARGS="--config ${config_path}/config_qact.yml --seed $MASTER_PORT"
 
 echo "Running command: $LAUNCHER $SCRIPT $SCRIPT_ARGS"
 
-$LAUNCHER $SCRIPT $SCRIPT_ARGS 
+$LAUNCHER $SCRIPT $SCRIPT_ARGS

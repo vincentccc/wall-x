@@ -15,10 +15,10 @@ from transformers import BatchFeature
 
 CAMERA_NAME_MAPPING = {
     "face_view": "front view",
-    "left_wrist_view": "left wrist view", 
+    "left_wrist_view": "left wrist view",
     "right_wrist_view": "right wrist view",
     "move1_view": "move view",
-    "move2_view": "move view", 
+    "move2_view": "move view",
     "wall_view": "wall view",
     "top_view": "top view",
 }
@@ -78,13 +78,13 @@ def preprocesser_call(
     return_tensors: str = "pt",
 ) -> BatchFeature:
     """Unified preprocessing function for Wall-X model handling text, image and video inputs.
-    
+
     Processes inputs into format suitable for multimodal transformer models, including:
     - Text tokenization and special token handling
     - Image/video processing through image processor
     - Attention mask and label generation
     - Padding and truncation handling
-    
+
     Args:
         processor: Multimodal processor containing tokenizer and image processor
         images: Input images (PIL, numpy arrays, or torch tensors)
@@ -94,7 +94,7 @@ def preprocesser_call(
         truncation: Whether to truncate sequences longer than max_length
         max_length: Maximum length for truncation/padding
         return_tensors: Format for returned tensors ('pt', 'np', etc.)
-        
+
     Returns:
         BatchFeature containing processed inputs with keys:
         - input_ids: Tokenized text
@@ -131,15 +131,17 @@ def preprocesser_call(
 
     # Process image placeholder tokens in text
     if image_grid_thw is not None:
-        merge_length = processor.image_processor.merge_size ** 2
+        merge_length = processor.image_processor.merge_size**2
         index = 0
         for i in range(len(text)):
             while "<|image_pad|>" in text[i]:
                 # Add bounds checking to avoid index overflow
                 if index >= len(image_grid_thw):
-                    print(f"Warning: Number of image placeholders ({index + 1}) "
-                          f"exceeds actual images ({len(image_grid_thw)}), "
-                          f"skipping remaining placeholder processing")
+                    print(
+                        f"Warning: Number of image placeholders ({index + 1}) "
+                        f"exceeds actual images ({len(image_grid_thw)}), "
+                        f"skipping remaining placeholder processing"
+                    )
                     break
                 # Replace image placeholder with actual token count
                 token_count = image_grid_thw[index].prod() // merge_length
@@ -151,7 +153,7 @@ def preprocesser_call(
 
     # Process video placeholder tokens in text
     if video_grid_thw is not None:
-        merge_length = processor.image_processor.merge_size ** 2
+        merge_length = processor.image_processor.merge_size**2
         index = 0
         for i in range(len(text)):
             while "<|video_pad|>" in text[i]:
@@ -169,7 +171,7 @@ def preprocesser_call(
         return_tensors=return_tensors,
         padding=padding,
         truncation=truncation,
-        max_length=max_length
+        max_length=max_length,
     )
 
     # Get pad token ID for label generation
@@ -209,9 +211,9 @@ def preprocesser_call(
             # From second part onwards, each part starts with assistant response
             for k in range(current_pos + 1, len(text_inputs.input_ids[i])):
                 if text_inputs.input_ids[i][k] == im_end_token_id:
-                    assistant_regions.append((
-                        current_pos + len(assistant_tokens), k + 2
-                    ))
+                    assistant_regions.append(
+                        (current_pos + len(assistant_tokens), k + 2)
+                    )
                     break
             current_pos += len(part_tokens) + 3
 
@@ -235,7 +237,14 @@ def preprocesser_call(
     return BatchFeature(data={**text_inputs, **image_inputs, **videos_inputs})
 
 
-def process_grounding_points(text: str, orig_height: int, orig_width: int, resized_height: int, resized_width: int, model_type: str) -> str:
+def process_grounding_points(
+    text: str,
+    orig_height: int,
+    orig_width: int,
+    resized_height: int,
+    resized_width: int,
+    model_type: str,
+) -> str:
     """Process grounding point coordinates in text based on image resizing.
 
     Adjusts coordinate values in <point> tags to match resized image dimensions
@@ -309,7 +318,9 @@ def process_grounding_points(text: str, orig_height: int, orig_width: int, resiz
 
 
 def get_frame_instruction(
-    instruction_info: Dict[str, Any], frame_idx: Optional[int] = None, truncate_keys: Optional[List[str]] = None
+    instruction_info: Dict[str, Any],
+    frame_idx: Optional[int] = None,
+    truncate_keys: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, Any], Optional[int]]:
     """Extract frame-specific instruction from instruction dictionary.
 
@@ -322,7 +333,12 @@ def get_frame_instruction(
         Tuple of (frame_instruction_dict, split_end_frame)
     """
     if truncate_keys is None:
-        truncate_keys = ["subtask_generation", "distribute", "subtask_generation_zh", "distribute_zh"]
+        truncate_keys = [
+            "subtask_generation",
+            "distribute",
+            "subtask_generation_zh",
+            "distribute_zh",
+        ]
 
     instruction_for_frame = {}
     split_end = None
@@ -334,7 +350,11 @@ def get_frame_instruction(
                 start_frame, end_frame = map(int, frame_range.split(" "))
                 if start_frame <= frame_idx < end_frame or (start_frame == frame_idx):
                     instruction_for_frame[key] = frame_instruction
-                    if truncate_keys is not None and split_end is None and key in truncate_keys:
+                    if (
+                        truncate_keys is not None
+                        and split_end is None
+                        and key in truncate_keys
+                    ):
                         split_end = end_frame + 1
                     break
         else:
@@ -343,7 +363,9 @@ def get_frame_instruction(
     return instruction_for_frame, split_end
 
 
-def get_task_instruction(frame_instruction_info: Dict[str, Any], priority_order: Optional[OrderedDict] = None) -> str:
+def get_task_instruction(
+    frame_instruction_info: Dict[str, Any], priority_order: Optional[OrderedDict] = None
+) -> str:
     """Construct task instruction from available instruction fields using priority sampling.
 
     Args:
@@ -428,7 +450,9 @@ def get_wallx_normal_text(
     action_fast_symbol = "<|action_fast|>"
 
     # System prologue
-    prologue = f"{role_start_symbol}system\nYou are a helpful assistant.{role_end_symbol}\n"
+    prologue = (
+        f"{role_start_symbol}system\nYou are a helpful assistant.{role_end_symbol}\n"
+    )
 
     # User request with observation
     user_request = f"{role_start_symbol}user\nObservation:"
@@ -439,13 +463,18 @@ def get_wallx_normal_text(
     user_request += "\nInstruction:"
 
     # Get frame-specific instruction
-    frame_instruction_info, _ = get_frame_instruction(instruction_info, frame_idx=frame_idx)
+    frame_instruction_info, _ = get_frame_instruction(
+        instruction_info, frame_idx=frame_idx
+    )
 
     generate_subtask = False
     priority_keys = ["subtask_generation", "distribute"]
 
     # Decide whether to generate subtask or actions
-    if bool(set(frame_instruction_info.keys()) & set(priority_keys)) and random.random() < generate_subtask_ratio:
+    if (
+        bool(set(frame_instruction_info.keys()) & set(priority_keys))
+        and random.random() < generate_subtask_ratio
+    ):
         # Generate subtask (equivalent to VQA task)
         instruction = frame_instruction_info.get("instruction", "")
         text_prompt = "\nPredict the next action in language.\n"
@@ -457,11 +486,15 @@ def get_wallx_normal_text(
                 output_instruction = frame_instruction_info[key]
                 break
 
-        assistant_output = f"{role_start_symbol}assistant\n{output_instruction}\n{role_end_symbol}"
+        assistant_output = (
+            f"{role_start_symbol}assistant\n{output_instruction}\n{role_end_symbol}"
+        )
         generate_subtask = True
     else:
         # Generate actions
-        instruction = get_task_instruction(frame_instruction_info, priority_order=priority_order)
+        instruction = get_task_instruction(
+            frame_instruction_info, priority_order=priority_order
+        )
         text_prompt = f"\nPredict the next action in robot action.\nProprioception: {propri_symbol}\n"
         user_message = f"{user_request} {instruction}{text_prompt}{role_end_symbol}\n"
         assistant_output = f"{role_start_symbol}assistant\n{action_fast_symbol}{role_end_symbol}\n{action_symbol * action_chunk_size}"
@@ -470,7 +503,9 @@ def get_wallx_normal_text(
     return complete_text, generate_subtask
 
 
-def get_action_tokens(normalized_actions: Union[torch.Tensor, List], action_tokenizer) -> List[List[str]]:
+def get_action_tokens(
+    normalized_actions: Union[torch.Tensor, List], action_tokenizer
+) -> List[List[str]]:
     """Convert normalized actions to action token strings.
 
     Args:
@@ -495,7 +530,9 @@ def get_action_tokens(normalized_actions: Union[torch.Tensor, List], action_toke
     return all_action_tokens
 
 
-def pad_action_token_strs(actions_token_lists: List[List[str]], pad_token: str = "<|endoftext|>") -> List[str]:
+def pad_action_token_strs(
+    actions_token_lists: List[List[str]], pad_token: str = "<|endoftext|>"
+) -> List[str]:
     """Pad action token lists to same length and join as strings.
 
     Args:
@@ -509,14 +546,20 @@ def pad_action_token_strs(actions_token_lists: List[List[str]], pad_token: str =
     padded_action_strs = []
 
     for tokens in actions_token_lists:
-        padded_tokens = tokens + ["<|im_end|>\n"] + [pad_token] * (max_len - len(tokens))
+        padded_tokens = (
+            tokens + ["<|im_end|>\n"] + [pad_token] * (max_len - len(tokens))
+        )
         padded_action_strs.append("".join(padded_tokens))
 
     return padded_action_strs
 
 
 def replace_action_token(
-    text: List[str], norm_action: Optional[torch.Tensor], action_tokenizer, dataset_names: List[str], dof_masks: Optional[torch.Tensor] = None
+    text: List[str],
+    norm_action: Optional[torch.Tensor],
+    action_tokenizer,
+    dataset_names: List[str],
+    dof_masks: Optional[torch.Tensor] = None,
 ) -> List[str]:
     """Replace action placeholders in text with actual action tokens.
 
@@ -531,14 +574,19 @@ def replace_action_token(
         List of text strings with action tokens replaced
     """
     # Filter out multimodal dataset names
-    dataset_names = [name for name in dataset_names if name not in MULTIMODAL_DATASET_NAMES]
+    dataset_names = [
+        name for name in dataset_names if name not in MULTIMODAL_DATASET_NAMES
+    ]
 
     # Get required action chunk sizes
     required_chunk_sizes = [FREQUENCY_MAPPING.get(name, 32) for name in dataset_names]
 
     if action_tokenizer is not None and norm_action is not None:
         # Extract actions based on chunk sizes and DOF masks
-        norm_action = [action[: required_chunk_sizes[i], dof_masks[i, 0].bool()] for i, action in enumerate(norm_action)]
+        norm_action = [
+            action[: required_chunk_sizes[i], dof_masks[i, 0].bool()]
+            for i, action in enumerate(norm_action)
+        ]
 
         # Convert to action tokens and pad
         actions_fast_tokens = get_action_tokens(norm_action, action_tokenizer)
@@ -548,7 +596,10 @@ def replace_action_token(
         actions_fast_token_idx = 0
         for i in range(len(text)):
             if "<|action_fast|>" in text[i]:
-                text[i] = text[i].replace("<|action_fast|><|im_end|>\n", actions_fast_token_strs[actions_fast_token_idx])
+                text[i] = text[i].replace(
+                    "<|action_fast|><|im_end|>\n",
+                    actions_fast_token_strs[actions_fast_token_idx],
+                )
                 actions_fast_token_idx += 1
 
         # Remove remaining action placeholders

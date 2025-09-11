@@ -549,4 +549,3 @@ void launch_multimodal_rope_backward(
         break;
     }
 }
-

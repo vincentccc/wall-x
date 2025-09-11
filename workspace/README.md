@@ -4,7 +4,7 @@ This document explains the key configuration parameters that can be modified for
 
 ## Quick Start Checklist
 1. **Update run.sh**: Set `code_dir` and `config_path` to your actual paths
-2. **Configure GPUs**: Set `CUDA_VISIBLE_DEVICES` for your available GPUs  
+2. **Configure GPUs**: Set `CUDA_VISIBLE_DEVICES` for your available GPUs
 3. **Update config paths**: Replace all `/path/to/` placeholders in `config_qact.yml` with actual paths
 4. **Configure robot**: Set `dof_config` and `agent_pos_config` for your robot
 5. **Set dataset**: Choose appropriate `repo_id` for your dataset

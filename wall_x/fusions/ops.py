@@ -5,7 +5,9 @@ from wall_x.fusions import backend
 
 class AsymmetricDualExpertGemm(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input_expert0, input_expert1, weight_expert0, weight_expert1, trans_b=False):
+    def forward(
+        ctx, input_expert0, input_expert1, weight_expert0, weight_expert1, trans_b=False
+    ):
         """
         Forward pass for asymmetric dual expert GEMM.
 
@@ -27,14 +29,24 @@ class AsymmetricDualExpertGemm(torch.autograd.Function):
 
         # Dimension validation depends on trans_b
         if trans_b:
-            assert input_expert0.size(1) == weight_expert0.size(1), "Expert 0 dimension mismatch (trans_b=True)"
-            assert input_expert1.size(1) == weight_expert1.size(1), "Expert 1 dimension mismatch (trans_b=True)"
+            assert input_expert0.size(1) == weight_expert0.size(
+                1
+            ), "Expert 0 dimension mismatch (trans_b=True)"
+            assert input_expert1.size(1) == weight_expert1.size(
+                1
+            ), "Expert 1 dimension mismatch (trans_b=True)"
         else:
-            assert input_expert0.size(1) == weight_expert0.size(0), "Expert 0 dimension mismatch (trans_b=False)"
-            assert input_expert1.size(1) == weight_expert1.size(0), "Expert 1 dimension mismatch (trans_b=False)"
+            assert input_expert0.size(1) == weight_expert0.size(
+                0
+            ), "Expert 0 dimension mismatch (trans_b=False)"
+            assert input_expert1.size(1) == weight_expert1.size(
+                0
+            ), "Expert 1 dimension mismatch (trans_b=False)"
 
         # Save tensors and trans_b for backward pass
-        ctx.save_for_backward(input_expert0, input_expert1, weight_expert0, weight_expert1)
+        ctx.save_for_backward(
+            input_expert0, input_expert1, weight_expert0, weight_expert1
+        )
         ctx.trans_b = trans_b
 
         # Allocate output tensors
@@ -43,11 +55,23 @@ class AsymmetricDualExpertGemm(torch.autograd.Function):
         n0 = weight_expert0.size(0) if trans_b else weight_expert0.size(1)
         n1 = weight_expert1.size(0) if trans_b else weight_expert1.size(1)
 
-        output_expert0 = torch.empty(m0, n0, device=input_expert0.device, dtype=input_expert0.dtype)
-        output_expert1 = torch.empty(m1, n1, device=input_expert1.device, dtype=input_expert1.dtype)
+        output_expert0 = torch.empty(
+            m0, n0, device=input_expert0.device, dtype=input_expert0.dtype
+        )
+        output_expert1 = torch.empty(
+            m1, n1, device=input_expert1.device, dtype=input_expert1.dtype
+        )
 
         # Call the backend C++ function
-        backend.asym_dual_gmm_separated(input_expert0, input_expert1, weight_expert0, weight_expert1, output_expert0, output_expert1, trans_b=trans_b)
+        backend.asym_dual_gmm_separated(
+            input_expert0,
+            input_expert1,
+            weight_expert0,
+            weight_expert1,
+            output_expert0,
+            output_expert1,
+            trans_b=trans_b,
+        )
 
         return output_expert0, output_expert1
 
@@ -111,10 +135,18 @@ class AsymmetricDualExpertGemm(torch.autograd.Function):
                 trans_b=False,
             )
 
-        return grad_input_expert0, grad_input_expert1, grad_weight_expert0, grad_weight_expert1, None
+        return (
+            grad_input_expert0,
+            grad_input_expert1,
+            grad_weight_expert0,
+            grad_weight_expert1,
+            None,
+        )
 
 
-def asym_dual_gmm(input_expert0, input_expert1, weight_expert0, weight_expert1, trans_b=False):
+def asym_dual_gmm(
+    input_expert0, input_expert1, weight_expert0, weight_expert1, trans_b=False
+):
     """
     Convenience function for asymmetric dual expert GEMM.
 
@@ -128,7 +160,9 @@ def asym_dual_gmm(input_expert0, input_expert1, weight_expert0, weight_expert1, 
     Returns:
         Tuple of (output_expert0, output_expert1)
     """
-    return AsymmetricDualExpertGemm.apply(input_expert0, input_expert1, weight_expert0, weight_expert1, trans_b)
+    return AsymmetricDualExpertGemm.apply(
+        input_expert0, input_expert1, weight_expert0, weight_expert1, trans_b
+    )
 
 
 ################################################################################################
@@ -145,7 +179,13 @@ class PermuteMoE_topK(torch.autograd.Function):
     max_expanded_token_num = 0
 
     @staticmethod
-    def forward(ctx, input_act: torch.Tensor, indices: torch.Tensor, num_out_tokens: int, max_token_num: int):
+    def forward(
+        ctx,
+        input_act: torch.Tensor,
+        indices: torch.Tensor,
+        num_out_tokens: int,
+        max_token_num: int,
+    ):
         """
         indices: for topK=1, indices in a 1-d tensor of shape [num_tokens],
                  otherwise, it's a 2-d tensor of shape [num_tokens, topK]
@@ -160,18 +200,28 @@ class PermuteMoE_topK(torch.autograd.Function):
 
         # Device check
         if input_act.is_cpu:
-            raise RuntimeError("[Error] The input `input_act` of permute_topK op is on the device: CPU!")
+            raise RuntimeError(
+                "[Error] The input `input_act` of permute_topK op is on the device: CPU!"
+            )
         if indices.is_cpu:
-            warnings.warn("The input `indices` of permute_topK op is on the device: CPU!")
+            warnings.warn(
+                "The input `indices` of permute_topK op is on the device: CPU!"
+            )
             expert_for_rows = expert_for_rows.cuda()
 
         # Shape check
         if input_act.size(0) != indices.size(0):
-            raise RuntimeError(f"[Error] permute_topK op input `indices` shape mismatch! " f"Expect {input_act.size(0)}, but got {indices.size(0)}.")
+            raise RuntimeError(
+                f"[Error] permute_topK op input `indices` shape mismatch! "
+                f"Expect {input_act.size(0)}, but got {indices.size(0)}."
+            )
 
         # Data type check
         if indices.dtype != torch.int32:
-            warnings.warn(f"The data type of the input `indices` of permute_topK op is {indices.dtype}! " "The recommended type is torch.int32.")
+            warnings.warn(
+                f"The data type of the input `indices` of permute_topK op is {indices.dtype}! "
+                "The recommended type is torch.int32."
+            )
             indices = indices.to(torch.int32)
 
         # Contiguous check
@@ -194,7 +244,11 @@ class PermuteMoE_topK(torch.autograd.Function):
             PermuteMoE_topK.workspace_fw = []
 
         permuted_act, row_id_map, PermuteMoE_topK.workspace_fw = backend.permute(
-            input_act, indices, num_out_tokens, PermuteMoE_topK.workspace_fw, PermuteMoE_topK.max_expanded_token_num
+            input_act,
+            indices,
+            num_out_tokens,
+            PermuteMoE_topK.workspace_fw,
+            PermuteMoE_topK.max_expanded_token_num,
         )
 
         ctx.row_id_map = row_id_map
@@ -215,7 +269,9 @@ class PermuteMoE_topK(torch.autograd.Function):
         num_tokens = ctx.num_tokens
         num_topK = ctx.num_topK
 
-        unpermuted_act_grad = backend.unpermute(permuted_act_grad, row_id_map, torch.tensor([]), num_tokens, num_topK)
+        unpermuted_act_grad = backend.unpermute(
+            permuted_act_grad, row_id_map, torch.tensor([]), num_tokens, num_topK
+        )
         return unpermuted_act_grad, None, None, None
 
 
@@ -229,7 +285,12 @@ class PermuteMoE_topK(torch.autograd.Function):
 class UnpermuteMoE_topK(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, input_act: torch.Tensor, row_id_map: torch.Tensor, probs: torch.Tensor = None):
+    def forward(
+        ctx,
+        input_act: torch.Tensor,
+        row_id_map: torch.Tensor,
+        probs: torch.Tensor = None,
+    ):
         # Empty input check
         if not input_act.numel():
             ctx.probs = probs
@@ -237,36 +298,51 @@ class UnpermuteMoE_topK(torch.autograd.Function):
 
         # Device check
         if input_act.is_cpu:
-            raise RuntimeError("[Error] The input `input_act` of unpermute_topK op is on the device: CPU!")
+            raise RuntimeError(
+                "[Error] The input `input_act` of unpermute_topK op is on the device: CPU!"
+            )
         if row_id_map.is_cpu:
-            warnings.warn("The input `row_id_map` of unpermute_topK op is on the device: CPU!")
+            warnings.warn(
+                "The input `row_id_map` of unpermute_topK op is on the device: CPU!"
+            )
             row_id_map = row_id_map.cuda()
         if probs is not None and probs.is_cpu:
-            warnings.warn("The input `probs` of unpermute_topK op is on the device: CPU!")
+            warnings.warn(
+                "The input `probs` of unpermute_topK op is on the device: CPU!"
+            )
             probs = probs.cuda()
 
         # Shape check
         if probs is not None and row_id_map.size(0) != probs.size(0) * probs.size(1):
             raise RuntimeError(
-                f"[Error] unpermute_topK op input `probs` shape mismatch! " f"Expect {row_id_map.size(0)}, but got {probs.size(0) * probs.size(1)}."
+                f"[Error] unpermute_topK op input `probs` shape mismatch! "
+                f"Expect {row_id_map.size(0)}, but got {probs.size(0) * probs.size(1)}."
             )
 
         # Data type check
         if row_id_map.dtype != torch.int32:
             warnings.warn(
-                f"The data type of the input `row_id_map` of unpermute_topK op is {row_id_map.dtype}! " "The recommended type is torch.int32."
+                f"The data type of the input `row_id_map` of unpermute_topK op is {row_id_map.dtype}! "
+                "The recommended type is torch.int32."
             )
             row_id_map = row_id_map.to(torch.int32)
         if probs is not None and probs.dtype != torch.float32:
-            warnings.warn(f"The data type of the input `probs` of unpermute_topK op is {probs.dtype}! " "The recommended type is torch.float32.")
+            warnings.warn(
+                f"The data type of the input `probs` of unpermute_topK op is {probs.dtype}! "
+                "The recommended type is torch.float32."
+            )
             probs = probs.to(torch.float32)
 
         # Contiguous check
         if not input_act.is_contiguous():
-            warnings.warn("The input `input_act` of unpermute_topK op is discontiguous!")
+            warnings.warn(
+                "The input `input_act` of unpermute_topK op is discontiguous!"
+            )
             input_act = input_act.contiguous()
         if not row_id_map.is_contiguous():
-            warnings.warn("The input `row_id_map` of unpermute_topK op is discontiguous!")
+            warnings.warn(
+                "The input `row_id_map` of unpermute_topK op is discontiguous!"
+            )
             row_id_map = row_id_map.contiguous()
         if probs is not None and not probs.is_contiguous():
             warnings.warn("The input `probs` of unpermute_topK op is discontiguous!")
@@ -275,7 +351,13 @@ class UnpermuteMoE_topK(torch.autograd.Function):
         num_tokens = probs.size(0) if probs is not None else input_act.size(0)
         num_topK = probs.size(1) if probs is not None else 1
 
-        unpermuted_output = backend.unpermute(input_act, row_id_map, probs if probs is not None else torch.tensor([]), num_tokens, num_topK)
+        unpermuted_output = backend.unpermute(
+            input_act,
+            row_id_map,
+            probs if probs is not None else torch.tensor([]),
+            num_tokens,
+            num_topK,
+        )
 
         ctx.save_for_backward(input_act, row_id_map, probs)
         return unpermuted_output
@@ -293,7 +375,9 @@ class UnpermuteMoE_topK(torch.autograd.Function):
 
         act_grad = None
         if ctx.needs_input_grad[0]:
-            act_grad, prob_grad = backend.unpermute_bwd(unpermuted_act_grad, input_act, row_id_map, probs)
+            act_grad, prob_grad = backend.unpermute_bwd(
+                unpermuted_act_grad, input_act, row_id_map, probs
+            )
 
         if not ctx.needs_input_grad[2]:
             prob_grad = None
@@ -319,19 +403,36 @@ def unpermute(input_act, row_id_map, probs=None):
 class MultimodalRoPE(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, mrope_section: list):
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        mrope_section: list,
+    ):
 
         # Device check
         if q.is_cpu:
-            raise RuntimeError("[Error] The input `q` of multimodal_rope op is on the device: CPU!")
+            raise RuntimeError(
+                "[Error] The input `q` of multimodal_rope op is on the device: CPU!"
+            )
         if k.is_cpu:
-            raise RuntimeError("[Error] The input `k` of multimodal_rope op is on the device: CPU!")
+            raise RuntimeError(
+                "[Error] The input `k` of multimodal_rope op is on the device: CPU!"
+            )
         if cos.is_cpu:
-            raise RuntimeError("[Error] The input `cos` of multimodal_rope op is on the device: CPU!")
+            raise RuntimeError(
+                "[Error] The input `cos` of multimodal_rope op is on the device: CPU!"
+            )
         if sin.is_cpu:
-            raise RuntimeError("[Error] The input `sin` of multimodal_rope op is on the device: CPU!")
+            raise RuntimeError(
+                "[Error] The input `sin` of multimodal_rope op is on the device: CPU!"
+            )
         if len(mrope_section) != 3:
-            raise RuntimeError("[Error] The input `mrope_section` of multimodal_rope op must be a list of 3 integers!")
+            raise RuntimeError(
+                "[Error] The input `mrope_section` of multimodal_rope op must be a list of 3 integers!"
+            )
 
         # Contiguous check
         if not q.is_contiguous():

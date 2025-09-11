@@ -190,7 +190,7 @@ class Qwen2_5_VLConfig(PretrainedConfig):
         experts=None,
         dof_config=None,
         noise_scheduler=None,
-        dim_inputs=(1536,1536),
+        dim_inputs=(1536, 1536),
         attention_moe=False,
         mlp_moe=False,
         **kwargs,

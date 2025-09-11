@@ -13,4 +13,3 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("rope", &launch_multimodal_rope_forward, "Multimodal RoPE forward kernel");
   m.def("rope_bwd", &launch_multimodal_rope_backward, "Multimodal RoPE backward kernel");
 }
-
