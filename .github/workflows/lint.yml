@@ -2,9 +2,10 @@ name: Pre-commit
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ '*' ]  # 所有分支的推送都触发
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [ '*' ]  # 针对所有分支的 PR 都触发
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   pre-commit:
