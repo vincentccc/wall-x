@@ -2,9 +2,10 @@
 LeRobot Dataset Loader - Distributed Version
 """
 
+import numpy as np
 import torch
-from torch.utils.data import DistributedSampler
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from torch.utils.data import DistributedSampler, random_split
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from typing import Protocol, SupportsIndex, TypeVar
 from qwen_vl_utils.vision_process import smart_resize
 from wall_x.data.config import X2RDataProcessingConfig
@@ -40,8 +41,16 @@ class Dataset(Protocol[T_co]):
 
 
 class PreprocessedDataset(Dataset[T_co]):
-    def __init__(self, dataset, config, dataload_config, seed=42, rank=0, world_size=1):
-        self._dataset = dataset
+    def __init__(self, dataset, config, dataload_config, seed=42, rank=0, world_size=1, test_only=False):
+        self.hf_dataset = dataset
+
+        if test_only:
+            self._dataset = dataset
+        else:
+            self._dataset = None
+            self.train_dataset, self.val_dataset = random_split(dataset, [0.95, 0.05], torch.Generator().manual_seed(seed) if seed is not None else None)
+            self._train()
+        
         self.seed = seed
         self.rank = rank
         self.world_size = world_size
@@ -60,11 +69,11 @@ class PreprocessedDataset(Dataset[T_co]):
             priority_order=self.dataload_config.get("priority_order", None),
         )
 
-        self._cam_key_mapping = CAMERA_KEY_MAPPINGS[self._dataset.meta.repo_id]
+        self._cam_key_mapping = CAMERA_KEY_MAPPINGS[self.hf_dataset.meta.repo_id]
 
     def _vision_preprocess(self, frames):
         processed_frames = []
-        for key in self._dataset.meta.camera_keys:
+        for key in self.hf_dataset.meta.camera_keys:
             from PIL import Image
 
             current_obs = frames[key].clone().permute(1, 2, 0)
@@ -131,6 +140,12 @@ class PreprocessedDataset(Dataset[T_co]):
     def __len__(self) -> int:
         return len(self._dataset)
 
+    def _eval(self):
+        self._dataset = self.val_dataset
+    
+    def _train(self):
+        self._dataset = self.train_dataset
+
     def get_train_dataloader(self):
         """
         Get distributed training dataloader
@@ -140,7 +155,8 @@ class PreprocessedDataset(Dataset[T_co]):
             world_size: Total number of processes
             seed: Random seed for reproducibility
         """
-
+        self._train()
+        
         batch_size = self.config.get("batch_size_per_gpu", 8)
         num_workers = self.config.get("num_workers", 4)
 
@@ -160,7 +176,7 @@ class PreprocessedDataset(Dataset[T_co]):
             sampler=sampler,  # Use distributed sampler instead of shuffle=True
             num_workers=num_workers,
             collate_fn=DataCollator(
-                self.config, self.dataload_config, self._dataset.meta.stats
+                self.config, self.dataload_config, self.hf_dataset.meta.stats
             ),
             pin_memory=True,  # Enable for GPU training
             persistent_workers=num_workers > 0,  # Only if num_workers > 0
@@ -174,7 +190,8 @@ class PreprocessedDataset(Dataset[T_co]):
         """
         Get distributed evaluation dataloader (no shuffling for consistent evaluation)
         """
-
+        self._eval()
+        
         batch_size = self.config.get(
             "eval_batch_size_per_gpu", self.config.get("batch_size_per_gpu", 8)
         )
@@ -195,7 +212,7 @@ class PreprocessedDataset(Dataset[T_co]):
             sampler=sampler,
             num_workers=num_workers,
             collate_fn=DataCollator(
-                self.config, self.dataload_config, self._dataset.meta.stats
+                self.config, self.dataload_config, self.hf_dataset.meta.stats
             ),
             pin_memory=True,
             persistent_workers=num_workers > 0,
@@ -405,8 +422,13 @@ def load_lerobot_data(
     # Set seed for reproducibility
     torch.manual_seed(seed)
 
-    dataset_fps = 50
     dataload_config = get_data_configs(config["data"])
+
+    # repo_id = "lerobot/aloha_mobile_cabinet"
+    repo_id = lerobot_config.get("repo_id", "lerobot/aloha_mobile_cabinet")
+    meta_info = LeRobotDatasetMetadata(repo_id)
+    dataset_fps = meta_info.fps
+    episodes_num = meta_info.total_episodes
 
     delta_timestamps = {
         # action chunk
@@ -416,20 +438,27 @@ def load_lerobot_data(
         ],
     }
     batch_size = config.get("batch_size_per_gpu", 8)
+    episodes = np.arange(episodes_num).tolist()
+    
+    train_test_split = dataload_config.get("train_test_split", 0.95)
+    train_episodes = episodes[:int(episodes_num * train_test_split)]
+    test_episodes = episodes[int(episodes_num * train_test_split):]
 
-    # repo_id = "lerobot/aloha_mobile_cabinet"
-    repo_id = lerobot_config.get("repo_id", "lerobot/aloha_mobile_cabinet")
-    dataset = LeRobotDataset(
-        repo_id, delta_timestamps=delta_timestamps, video_backend="pyav"
+    train_dataset = LeRobotDataset(
+        repo_id, episodes=train_episodes, delta_timestamps=delta_timestamps, video_backend="pyav"
     )
 
+    
+
     if rank == 0:
-        print(f"Selected episodes: {dataset.episodes}")
-        print(f"Number of episodes selected: {dataset.num_episodes}")
-        print(f"Number of frames selected: {dataset.num_frames}")
+        print(f"Selected train episodes: {train_dataset.episodes}")
+        print(f"Number of train episodes selected: {train_dataset.num_episodes}")
+        print(f"Number of train frames selected: {train_dataset.num_frames}")
+        print(f"Selected test episodes: {test_episodes}")
+
 
     dataset = PreprocessedDataset(
-        dataset, config, dataload_config, seed=seed, rank=rank, world_size=world_size
+        train_dataset, config, dataload_config, seed=seed, rank=rank, world_size=world_size
     )
 
     # Calculate samples per process
@@ -510,7 +539,7 @@ def get_data_configs(config):
 class TestDataset(PreprocessedDataset):
     def __init__(self, dataset, config, dataload_config, seed=42):
         super().__init__(
-            dataset, config, dataload_config, seed=seed, rank=0, world_size=1
+            dataset, config, dataload_config, seed=seed, rank=0, world_size=1, test_only=True
         )
 
     def get_dataloader(self):
@@ -522,7 +551,7 @@ class TestDataset(PreprocessedDataset):
             self,
             batch_size=1,
             collate_fn=DataCollator(
-                self.config, self.dataload_config, self._dataset.meta.stats
+                self.config, self.dataload_config, self.hf_dataset.meta.stats
             ),
         )
 
@@ -567,6 +596,7 @@ def load_test_dataset(
         delta_timestamps=delta_timestamps,
         video_backend="pyav",
     )
+    
 
     print(f"Selected episodes: {dataset.episodes}")
     print(f"Number of episodes selected: {dataset.num_episodes}")
