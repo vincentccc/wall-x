@@ -41,16 +41,29 @@ class Dataset(Protocol[T_co]):
 
 
 class PreprocessedDataset(Dataset[T_co]):
-    def __init__(self, dataset, config, dataload_config, seed=42, rank=0, world_size=1, test_only=False):
+    def __init__(
+        self,
+        dataset,
+        config,
+        dataload_config,
+        seed=42,
+        rank=0,
+        world_size=1,
+        test_only=False,
+    ):
         self.hf_dataset = dataset
 
         if test_only:
             self._dataset = dataset
         else:
             self._dataset = None
-            self.train_dataset, self.val_dataset = random_split(dataset, [0.95, 0.05], torch.Generator().manual_seed(seed) if seed is not None else None)
+            self.train_dataset, self.val_dataset = random_split(
+                dataset,
+                [0.95, 0.05],
+                torch.Generator().manual_seed(seed) if seed is not None else None,
+            )
             self._train()
-        
+
         self.seed = seed
         self.rank = rank
         self.world_size = world_size
@@ -142,7 +155,7 @@ class PreprocessedDataset(Dataset[T_co]):
 
     def _eval(self):
         self._dataset = self.val_dataset
-    
+
     def _train(self):
         self._dataset = self.train_dataset
 
@@ -156,7 +169,7 @@ class PreprocessedDataset(Dataset[T_co]):
             seed: Random seed for reproducibility
         """
         self._train()
-        
+
         batch_size = self.config.get("batch_size_per_gpu", 8)
         num_workers = self.config.get("num_workers", 4)
 
@@ -191,7 +204,7 @@ class PreprocessedDataset(Dataset[T_co]):
         Get distributed evaluation dataloader (no shuffling for consistent evaluation)
         """
         self._eval()
-        
+
         batch_size = self.config.get(
             "eval_batch_size_per_gpu", self.config.get("batch_size_per_gpu", 8)
         )
@@ -445,16 +458,18 @@ def load_lerobot_data(
     }
     batch_size = config.get("batch_size_per_gpu", 8)
     episodes = np.arange(episodes_num).tolist()
-    
+
     train_test_split = dataload_config.get("train_test_split", 0.95)
-    train_episodes = episodes[:int(episodes_num * train_test_split)]
-    test_episodes = episodes[int(episodes_num * train_test_split):]
+    train_episodes = episodes[: int(episodes_num * train_test_split)]
+    test_episodes = episodes[int(episodes_num * train_test_split) :]
 
     train_dataset = LeRobotDataset(
-        repo_id, root=root, episodes=train_episodes, delta_timestamps=delta_timestamps, video_backend="pyav"
+        repo_id,
+        root=root,
+        episodes=train_episodes,
+        delta_timestamps=delta_timestamps,
+        video_backend="pyav",
     )
-
-    
 
     if rank == 0:
         print(f"Selected train episodes: {train_dataset.episodes}")
@@ -462,9 +477,13 @@ def load_lerobot_data(
         print(f"Number of train frames selected: {train_dataset.num_frames}")
         print(f"Selected test episodes: {test_episodes}")
 
-
     dataset = PreprocessedDataset(
-        train_dataset, config, dataload_config, seed=seed, rank=rank, world_size=world_size
+        train_dataset,
+        config,
+        dataload_config,
+        seed=seed,
+        rank=rank,
+        world_size=world_size,
     )
 
     # Calculate samples per process
@@ -545,7 +564,13 @@ def get_data_configs(config):
 class TestDataset(PreprocessedDataset):
     def __init__(self, dataset, config, dataload_config, seed=42):
         super().__init__(
-            dataset, config, dataload_config, seed=seed, rank=0, world_size=1, test_only=True
+            dataset,
+            config,
+            dataload_config,
+            seed=seed,
+            rank=0,
+            world_size=1,
+            test_only=True,
         )
 
     def get_dataloader(self):
@@ -602,7 +627,6 @@ def load_test_dataset(
         delta_timestamps=delta_timestamps,
         video_backend="pyav",
     )
-    
 
     print(f"Selected episodes: {dataset.episodes}")
     print(f"Number of episodes selected: {dataset.num_episodes}")
