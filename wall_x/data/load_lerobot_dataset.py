@@ -255,14 +255,6 @@ class DataCollator:
         processor_path = self.config["pretrained_wallx_path"]
         action_tokenizer_path = self.config["action_tokenizer_path"]
 
-        # Use cached processors if available
-        if processor_path not in self._processor_cache:
-            self._processor_cache[processor_path] = AutoProcessor.from_pretrained(
-                processor_path, use_fast=True
-            )
-            if self.config.get("padding_side", "left") == "left":
-                self._processor_cache[processor_path].tokenizer.padding_side = "left"
-
         if (
             self.use_fast_tokenizer
             and action_tokenizer_path not in self._action_tokenizer_cache
@@ -273,6 +265,26 @@ class DataCollator:
                 )
             )
 
+        # Use cached processors if available
+        if processor_path not in self._processor_cache:
+            processor = AutoProcessor.from_pretrained(
+                processor_path, use_fast=True
+            )
+            if self.config.get("padding_side", "left") == "left":
+                processor.tokenizer.padding_side = "left"
+            
+            if self.use_fast_tokenizer and self.config.get("model_type") == "qwen2_5":
+                action_tokenizer = self._action_tokenizer_cache[action_tokenizer_path]
+                new_tokens = ["<|propri|>", "<|action|>"]
+                new_tokens += [f"<|action_token_{i}|>" for i in range(action_tokenizer.vocab_size)] 
+                processor.tokenizer.add_tokens(new_tokens)
+                begin_idx_token = "<|action_token_0|>"
+                token_id = processor.tokenizer.convert_tokens_to_ids(begin_idx_token)
+                processor.tokenizer.init_kwargs["action_token_start_index"] = token_id
+                processor.tokenizer.init_kwargs["action_token_vocab_size"] = action_tokenizer.vocab_size
+            
+            self._processor_cache[processor_path] = processor
+
         self.processor = self._processor_cache[processor_path]
 
         if not self.use_fast_tokenizer:
@@ -282,14 +294,14 @@ class DataCollator:
                 action_tokenizer_path
             ]
 
-        if self.use_fast_tokenizer:
-            self.action_mapper = {}
-            for i in range(self.train_action_tokenizer.vocab_size):
-                token = f"<|action_token_{i}|>"
-                token_id = self.processor.tokenizer.convert_tokens_to_ids(token)
-                self.action_mapper[token_id] = i
-        else:
-            self.action_mapper = None
+        # if self.use_fast_tokenizer:
+        #     self.action_mapper = {}
+        #     for i in range(self.train_action_tokenizer.vocab_size):
+        #         token = f"<|action_token_{i}|>"
+        #         token_id = self.processor.tokenizer.convert_tokens_to_ids(token)
+        #         self.action_mapper[token_id] = i
+        # else:
+        #     self.action_mapper = None
 
     @classmethod
     def _normalize(cls, action, min_stat, delta):
