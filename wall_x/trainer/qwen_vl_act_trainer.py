@@ -225,7 +225,7 @@ class QwenVlAct_Trainer:
             self.train_loop(epoch)
             self.accelerator.wait_for_everyone()
 
-            if (epoch + 1) % self.config.get("epoch_save_interval", 10) == 0:
+            if (epoch + 1) % self.config.get("epoch_save_interval", 1) == 0:
                 self.save_checkpoint(epoch)
 
             # Validation after each epoch
@@ -313,11 +313,13 @@ class QwenVlAct_Trainer:
                 with self.accelerator.accumulate(self.model):
                     # Forward pass
                     self.timers("forward-compute", log_level=0).start(barrier=False)
+                    # print("batch key:",batch.keys())
                     outputs = self.model(**batch, mode="train")
                     self.timers("forward-compute").stop()
-
+                    
                     loss = outputs.loss
-
+                    # highlight below
+                    # print(f"\033[92m loss : {loss}\033[0m", flush=True)
                     # Check for NaN loss
                     if torch.isnan(loss):
                         print(
@@ -519,12 +521,46 @@ class QwenVlAct_Trainer:
         - Model preparation for distributed training
         """
         # Load pretrained model
-        model = Qwen2_5_VLMoEForAction.from_pretrained(
-            self.config["pretrained_wallx_path"],
-            **{"use_fast_tokenizer": self.use_fast_tokenizer},
-        )
-        self.processor = model.processor
-        model = model.to(torch.bfloat16)
+        model_type = self.config.get("model_type", "qwen2_5")
+        assert model_type in ["wall-oss", "qwen2_5"]
+        if model_type == "wall-oss":
+            model = Qwen2_5_VLMoEForAction.from_pretrained(
+                self.config["pretrained_wallx_path"],
+                **{"use_fast_tokenizer": self.use_fast_tokenizer},
+            )
+            self.processor = model.processor
+            model = model.to(torch.bfloat16)
+        elif model_type == "qwen2_5":
+            from wall_x.model.qwen2_5_based import Qwen2_5_VLMoEForAction, Qwen2_5_VLConfig
+            from transformers import AutoProcessor
+            config = Qwen2_5_VLConfig.from_pretrained(self.config["qwen_vl_act_config_path"])
+            flow_loss_weight = self.config.get("flow_loss_weight", 1.0)
+            self.processor = AutoProcessor.from_pretrained(self.config["pretrained_wallx_path"], use_fast=True)
+            if self.config.get("use_fast_tokenizer", False):
+                action_tokenizer_path = self.config["action_tokenizer_path"]
+                action_tokenizer = AutoProcessor.from_pretrained(
+                    action_tokenizer_path, trust_remote_code=True
+                )
+                # process for use fast
+                new_tokens = ["<|propri|>", "<|action|>"]
+                new_tokens += [f"<|action_token_{i}|>" for i in range(action_tokenizer.vocab_size)] 
+                self.processor.tokenizer.add_tokens(new_tokens)
+                begin_idx_token = "<|action_token_0|>"
+                token_id = self.processor.tokenizer.convert_tokens_to_ids(begin_idx_token)
+                self.processor.tokenizer.init_kwargs["action_token_start_index"] = token_id
+                self.processor.tokenizer.init_kwargs["action_token_vocab_size"] = action_tokenizer.vocab_size
+                # model.processor = self.processor
+                self.processor.action_processor = action_tokenizer
+            model = Qwen2_5_VLMoEForAction(config, self.use_fast_tokenizer, self.processor, flow_loss_weight=flow_loss_weight)
+
+        
+            
+            model = model.to(torch.bfloat16)
+            model = self.load_qwen_pretrain_weight(model, self.config["pretrained_wallx_path"])
+            model.resize_token_embeddings(len(self.processor.tokenizer))
+            model = model.to(torch.bfloat16)
+        else:
+            raise NotImplementedError(f"Invalid model type: {model_type}")
 
         # Configure optimizer based on training strategy
         if "freeze_vlm" in self.config and self.config["freeze_vlm"]:
@@ -734,7 +770,7 @@ class QwenVlAct_Trainer:
         log_string += " time_per_step_avg {:.6f}s |".format(time_per_step)
 
         print_rank_last(log_string)
-        self.timers.log(timers_to_log, normalizer=1)
+        # self.timers.log(timers_to_log, normalizer=1)
 
     def save_checkpoint(self, epoch, step=0):
         """
