@@ -4,10 +4,12 @@ This document explains the key configuration parameters and memory requirements 
 
 ## Quick Start Checklist
 
-### 🚀 **Step 1: Download Pre-trained Model**
-Choose one of the available models:
+### 🚀 **Step 1: Prepare Model**
+Choose one of our pretrained models:
 - **WALL-OSS-FLOW**: https://huggingface.co/x-square-robot/wall-oss-flow
 - **WALL-OSS-FAST**: https://huggingface.co/x-square-robot/wall-oss-fast
+Or from Qwen-2.5-VL
+- Download https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct, settings refer to `config_qact_from_vlm.yml`
 
 ### ⚙️ **Step 2: Configure Environment**
 - Update `run.sh`: Set `code_dir` and `config_path` to your actual paths
@@ -106,3 +108,9 @@ Below are the memory consumption benchmarks for different training configuration
 
 - For single GPU training: Ensure at least 48GB VRAM (e.g., RTX 6000 Ada, A6000)
 - For multi-GPU training: Enable FSDP2 for optimal memory distribution
+
+## Reproduce
+
+Openloop plot `wall-x/workspace/lerobot_example/evaluation/lerobot_openloop.png`
+
+To reproduce the results, use the config file wall-x/workspace/lerobot_example/config_qact_from_vlm.yml with a global batch size of 128, adjusted via `gradient_accumulation_steps` and numbers of gpu.

@@ -15,9 +15,9 @@ from torch.distributed.tensor import distribute_tensor
 from accelerate import Accelerator
 from safetensors.torch import load_file
 from transformers.optimization import get_cosine_with_min_lr_schedule_with_warmup
-
+from transformers import AutoProcessor
 from wall_x.utils.timers import Timers
-from wall_x.model.qwen2_5_based import Qwen2_5_VLMoEForAction
+from wall_x.model.qwen2_5_based import Qwen2_5_VLMoEForAction, Qwen2_5_VLConfig
 from wall_x.data.config import ACTION_DATASET_NAMES, MULTIMODAL_DATASET_NAMES
 from wall_x.data.load_lerobot_dataset import (
     PreprocessedDataset,
@@ -316,7 +316,7 @@ class QwenVlAct_Trainer:
                     # print("batch key:",batch.keys())
                     outputs = self.model(**batch, mode="train")
                     self.timers("forward-compute").stop()
-                    
+
                     loss = outputs.loss
                     # highlight below
                     # print(f"\033[92m loss : {loss}\033[0m", flush=True)
@@ -531,11 +531,14 @@ class QwenVlAct_Trainer:
             self.processor = model.processor
             model = model.to(torch.bfloat16)
         elif model_type == "qwen2_5":
-            from wall_x.model.qwen2_5_based import Qwen2_5_VLMoEForAction, Qwen2_5_VLConfig
-            from transformers import AutoProcessor
-            config = Qwen2_5_VLConfig.from_pretrained(self.config["qwen_vl_act_config_path"])
+
+            config = Qwen2_5_VLConfig.from_pretrained(
+                self.config["qwen_vl_act_config_path"]
+            )
             flow_loss_weight = self.config.get("flow_loss_weight", 1.0)
-            self.processor = AutoProcessor.from_pretrained(self.config["pretrained_wallx_path"], use_fast=True)
+            self.processor = AutoProcessor.from_pretrained(
+                self.config["pretrained_wallx_path"], use_fast=True
+            )
             if self.config.get("use_fast_tokenizer", False):
                 action_tokenizer_path = self.config["action_tokenizer_path"]
                 action_tokenizer = AutoProcessor.from_pretrained(
@@ -543,20 +546,32 @@ class QwenVlAct_Trainer:
                 )
                 # process for use fast
                 new_tokens = ["<|propri|>", "<|action|>"]
-                new_tokens += [f"<|action_token_{i}|>" for i in range(action_tokenizer.vocab_size)] 
+                new_tokens += [
+                    f"<|action_token_{i}|>" for i in range(action_tokenizer.vocab_size)
+                ]
                 self.processor.tokenizer.add_tokens(new_tokens)
                 begin_idx_token = "<|action_token_0|>"
-                token_id = self.processor.tokenizer.convert_tokens_to_ids(begin_idx_token)
-                self.processor.tokenizer.init_kwargs["action_token_start_index"] = token_id
-                self.processor.tokenizer.init_kwargs["action_token_vocab_size"] = action_tokenizer.vocab_size
-                # model.processor = self.processor
+                token_id = self.processor.tokenizer.convert_tokens_to_ids(
+                    begin_idx_token
+                )
+                self.processor.tokenizer.init_kwargs["action_token_start_index"] = (
+                    token_id
+                )
+                self.processor.tokenizer.init_kwargs["action_token_vocab_size"] = (
+                    action_tokenizer.vocab_size
+                )
                 self.processor.action_processor = action_tokenizer
-            model = Qwen2_5_VLMoEForAction(config, self.use_fast_tokenizer, self.processor, flow_loss_weight=flow_loss_weight)
+            model = Qwen2_5_VLMoEForAction(
+                config,
+                self.use_fast_tokenizer,
+                self.processor,
+                flow_loss_weight=flow_loss_weight,
+            )
 
-        
-            
             model = model.to(torch.bfloat16)
-            model = self.load_qwen_pretrain_weight(model, self.config["pretrained_wallx_path"])
+            model = self.load_qwen_pretrain_weight(
+                model, self.config["pretrained_wallx_path"]
+            )
             model.resize_token_embeddings(len(self.processor.tokenizer))
             model = model.to(torch.bfloat16)
         else:
@@ -770,7 +785,7 @@ class QwenVlAct_Trainer:
         log_string += " time_per_step_avg {:.6f}s |".format(time_per_step)
 
         print_rank_last(log_string)
-        # self.timers.log(timers_to_log, normalizer=1)
+        self.timers.log(timers_to_log, normalizer=1)
 
     def save_checkpoint(self, epoch, step=0):
         """
