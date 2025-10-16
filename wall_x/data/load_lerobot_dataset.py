@@ -296,15 +296,6 @@ class DataCollator:
                 action_tokenizer_path
             ]
 
-        # if self.use_fast_tokenizer:
-        #     self.action_mapper = {}
-        #     for i in range(self.train_action_tokenizer.vocab_size):
-        #         token = f"<|action_token_{i}|>"
-        #         token_id = self.processor.tokenizer.convert_tokens_to_ids(token)
-        #         self.action_mapper[token_id] = i
-        # else:
-        #     self.action_mapper = None
-
     @classmethod
     def _normalize(cls, action, min_stat, delta):
         """

@@ -91,6 +91,13 @@ Keep `agent_pos_config` consistent with `dof_config`.
 - `resume.ckpt`: Path to checkpoint for resuming training
 - `resume.load_ckpt_only`: Only load model weights, not optimizer state
 
+## Merge checkpoint
+- If FSDP SHARDED_STATE_DICT is used, please run command below to merge checkpoint into a single safetensors
+```bash
+    # refer to accelerate/commands/merge.py
+    accelerate merge-weights /path/to/sharded_tensors /path/to/model.safetensors
+```
+
 ## Memory Usage
 
 Below are the memory consumption benchmarks for different training configurations using the `lerobot/aloha_mobile_cabinet` dataset:
