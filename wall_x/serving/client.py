@@ -12,9 +12,11 @@ from typing import Dict
 import numpy as np
 import threading
 import yaml
+
 try:
     import msgpack
     import msgpack_numpy as m
+
     m.patch()
 except ImportError:
     print("Please install msgpack-numpy: pip install msgpack-numpy")
@@ -90,29 +92,32 @@ class WallXClient:
         pass
 
     # ============ Synchronous methods (using independent thread event loop) ============
-    
+
     def _start_background_loop(self):
         """Start event loop in background thread."""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
-    
+
     def _ensure_loop(self):
         """Ensure background event loop is running."""
         if self._loop is None or not self._loop.is_running():
-            self._thread = threading.Thread(target=self._start_background_loop, daemon=True)
+            self._thread = threading.Thread(
+                target=self._start_background_loop, daemon=True
+            )
             self._thread.start()
             # Wait for loop to start
             import time
+
             while self._loop is None:
                 time.sleep(0.01)
-    
+
     def _run_async(self, coro):
         """Run coroutine in background event loop."""
         self._ensure_loop()
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result()
-    
+
     def connect_sync(self):
         """Synchronously connect to server."""
         return self._run_async(self.connect())
@@ -144,36 +149,39 @@ class WallXClient:
 def prepare_batch_sync(data, normalizer_action, normalizer_propri, dataset_name):
     """Synchronous version of prepare_batch."""
     import torch
-    
-    image = (data["image"].permute(1,2,0) * 255).to(torch.uint8).cpu().numpy()
-    wrist_image = (data["wrist_image"].permute(1,2,0) * 255).to(torch.uint8).cpu().numpy()
+
+    image = (data["image"].permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
+    wrist_image = (
+        (data["wrist_image"].permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
+    )
     prompt = data["task"]
-    
+
     state = data["state"].to("cuda")
     if state.dim() == 1:
         state = state.unsqueeze(0)
-    
+
     state_mask = torch.ones([1, 32, 20]).to("cuda")
-    state_mask[:,:, 8:] = 0    
-    
+    state_mask[:, :, 8:] = 0
+
     state = normalizer_propri.normalize_data(state, [dataset_name], state_mask)
     state = state.cpu().numpy().astype(np.float32)
-    
-    
-    
+
     obs = {
         "front_view": image,
         "left_wrist_view": wrist_image,
         "prompt": prompt,
         "state": state,
-        "dataset_names": [dataset_name]
+        "dataset_names": [dataset_name],
     }
     return obs
 
 
 def init_serving_sample_dataset(train_config):
     from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-    from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import Qwen2_5_VLMoEForAction
+    from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import (
+        Qwen2_5_VLMoEForAction,
+    )
+
     repo_id = train_config["data"]["lerobot_config"]["repo_id"]
 
     meta_info = LeRobotDatasetMetadata(repo_id)
@@ -187,14 +195,21 @@ def init_serving_sample_dataset(train_config):
         delta_timestamps=delta_timestamps,
         video_backend="pyav",
     )
-    
+
     from wall_x.model.action_head import Normalizer
     from wall_x.utils.constant import action_statistic_dof
-    customized_dof_config = train_config["customized_robot_config"]["customized_dof_config"]
-    customized_agent_pos_config = train_config["customized_robot_config"]["customized_agent_pos_config"]
+
+    customized_dof_config = train_config["customized_robot_config"][
+        "customized_dof_config"
+    ]
+    customized_agent_pos_config = train_config["customized_robot_config"][
+        "customized_agent_pos_config"
+    ]
     Qwen2_5_VLMoEForAction._set_customized_config(train_config)
 
-    normalizer_action = Normalizer(action_statistic_dof, customized_dof_config).to("cuda")
+    normalizer_action = Normalizer(action_statistic_dof, customized_dof_config).to(
+        "cuda"
+    )
     normalizer_propri = Normalizer(
         action_statistic_dof, customized_agent_pos_config
     ).to("cuda")
@@ -203,6 +218,7 @@ def init_serving_sample_dataset(train_config):
 
 
 # ============ Synchronous version of main function ============
+
 
 def main_sync(args):
     """Synchronous version of main function."""
@@ -215,34 +231,43 @@ def main_sync(args):
     with open(config_path, "r") as f:
         train_config = yaml.load(f, Loader=yaml.FullLoader)
         train_config["data"]["model_type"] = train_config.get("model_type")
-        
-    dataset, normalizer_action, normalizer_propri = init_serving_sample_dataset(train_config)
 
-    
+    dataset, normalizer_action, normalizer_propri = init_serving_sample_dataset(
+        train_config
+    )
+
     total_frames = len(dataset)
     gt_traj = np.zeros((total_frames, args.action_dim))
     pred_traj = np.zeros((total_frames, args.action_dim))
     import torch
+
     dof_mask = torch.ones([1, 32, 20]).to("cuda")
-    dof_mask[:,:, args.action_dim:] = 0    
-    
+    dof_mask[:, :, args.action_dim :] = 0
+
     # Synchronous processing
     for idx, data in enumerate(dataset):
         if idx % args.pred_horizon == 0 and idx + args.pred_horizon < total_frames:
             print(f"Processing frame {idx}")
-            obs = prepare_batch_sync(data, normalizer_action, normalizer_propri, dataset_name="physical-intelligence/libero")
+            obs = prepare_batch_sync(
+                data,
+                normalizer_action,
+                normalizer_propri,
+                dataset_name="physical-intelligence/libero",
+            )
             response = client.predict_sync(obs)
             pred_action = response["action"]
             pred_traj[idx : idx + args.pred_horizon] = pred_action
             gt_traj[idx : idx + args.pred_horizon] = data["actions"]
-    
 
     # Draw plot
     timesteps = gt_traj.shape[0]
     import matplotlib.pyplot as plt
     import os
+
     save_dir = "/x2robot_v2/vincent/workspace/opensource/plots/libero"
-    fig, axs = plt.subplots(args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True)
+    fig, axs = plt.subplots(
+        args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True
+    )
     fig.suptitle("Action Comparison for lerobot", fontsize=16)
 
     for i in range(args.action_dim):
@@ -251,7 +276,7 @@ def main_sync(args):
         axs[i].set_ylabel(f"Action Dim {i+1}")
         axs[i].legend()
         axs[i].grid(True)
-    
+
     axs[-1].set_xlabel("Timestep")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     os.makedirs(save_dir, exist_ok=True)
@@ -259,26 +284,29 @@ def main_sync(args):
     plt.savefig(save_path)
     print(f"Saved plot to {save_path}")
     plt.close()
-    
+
     # Close connection
     client.close_sync()
 
 
 # ============ Asynchronous version of main function (keep original functionality) ============
 
+
 async def main(args):
     client = WallXClient(uri=args.uri)
     await client.connect()
-    
+
     config_path = args.config_path
     with open(config_path, "r") as f:
         train_config = yaml.load(f, Loader=yaml.FullLoader)
-    dataset, normalizer_action, normalizer_propri = init_serving_sample_dataset(train_config)
-    
+    dataset, normalizer_action, normalizer_propri = init_serving_sample_dataset(
+        train_config
+    )
+
     total_frames = len(dataset)
     gt_traj = np.zeros((total_frames, args.action_dim))
     pred_traj = np.zeros((total_frames, args.action_dim))
-    
+
     for idx, data in enumerate(dataset):
         if idx % args.pred_horizon == 0 and idx + args.pred_horizon < total_frames:
             print(f"Processing frame {idx}")
@@ -292,8 +320,11 @@ async def main(args):
     timesteps = gt_traj.shape[0]
     import matplotlib.pyplot as plt
     import os
+
     save_dir = "/x2robot_v2/vincent/workspace/opensource/plots/libero"
-    fig, axs = plt.subplots(args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True)
+    fig, axs = plt.subplots(
+        args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True
+    )
     fig.suptitle("Action Comparison for lerobot", fontsize=16)
 
     for i in range(args.action_dim):
@@ -302,7 +333,7 @@ async def main(args):
         axs[i].set_ylabel(f"Action Dim {i+1}")
         axs[i].legend()
         axs[i].grid(True)
-    
+
     axs[-1].set_xlabel("Timestep")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     os.makedirs(save_dir, exist_ok=True)
@@ -328,13 +359,17 @@ if __name__ == "__main__":
         default="ws://localhost:8000",
         help="Server URI",
     )
-    parser.add_argument("--pred_horizon", type=int, default=32, help="Prediction horizon")
+    parser.add_argument(
+        "--pred_horizon", type=int, default=32, help="Prediction horizon"
+    )
     parser.add_argument("--action_dim", type=int, default=7, help="Action dimension")
-    parser.add_argument("--config_path", default="/path/to/train/config", help="Train config path")
+    parser.add_argument(
+        "--config_path", default="/path/to/train/config", help="Train config path"
+    )
     args = parser.parse_args()
-    
+
     # Synchronous mode
     main_sync(args)
-    
+
     # Asynchronous mode
     # asyncio.run(main(args))

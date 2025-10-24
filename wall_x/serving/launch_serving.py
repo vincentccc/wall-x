@@ -56,7 +56,9 @@ class ModelConfig:
     # Prediction mode (fast or slow)
     predict_mode: str = "fast"
     # Camera key for the environment
-    camera_key: List[str] = field(default_factory=lambda: ["front_view", "left_wrist_view", "right_wrist_view"])
+    camera_key: List[str] = field(
+        default_factory=lambda: ["front_view", "left_wrist_view", "right_wrist_view"]
+    )
 
 
 @dataclasses.dataclass
@@ -136,7 +138,9 @@ def create_policy(args: Args) -> WallXPolicy:
         logger.warning(f"Model path does not exist: {config.model_path}")
 
     if not Path(config.action_tokenizer_path).exists():
-        logger.warning(f"Action tokenizer path does not exist: {config.action_tokenizer_path}")
+        logger.warning(
+            f"Action tokenizer path does not exist: {config.action_tokenizer_path}"
+        )
 
     with open(config.train_config_path, "r") as f:
         train_config = yaml.load(f, Loader=yaml.FullLoader)

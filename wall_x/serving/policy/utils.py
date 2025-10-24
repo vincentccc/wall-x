@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, List
 import logging
 import numpy as np
 from wall_x.data.utils import preprocesser_call
@@ -9,7 +9,22 @@ from transformers import BatchFeature
 
 logger = logging.getLogger(__name__)
 
-def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, action_dim, pred_horizon, fixed_action_dim, max_length, image_factor: int, min_pixels: int, max_pixels: int, predict_mode: str = "fast", device: str = "cuda") -> BatchFeature:
+
+def prepare_batch(
+    obs: Dict,
+    processor,
+    camera_key: List[str],
+    agent_pos_dim,
+    action_dim,
+    pred_horizon,
+    fixed_action_dim,
+    max_length,
+    image_factor: int,
+    min_pixels: int,
+    max_pixels: int,
+    predict_mode: str = "fast",
+    device: str = "cuda",
+) -> BatchFeature:
     """Prepare observation into model input format.
 
     Args:
@@ -34,7 +49,9 @@ def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, ac
 
             # Handle unexpected dimensions - squeeze if needed
             if img.ndim > 3:
-                logger.warning(f"Image has {img.ndim} dimensions, squeezing extra dimensions")
+                logger.warning(
+                    f"Image has {img.ndim} dimensions, squeezing extra dimensions"
+                )
                 img = np.squeeze(img)
 
             # Verify shape is valid for PIL
@@ -50,9 +67,13 @@ def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, ac
                     # Already channels last
                     pass
                 else:
-                    raise ValueError(f"Unexpected image shape: {img.shape}. Expected (H, W, C) or (C, H, W)")
+                    raise ValueError(
+                        f"Unexpected image shape: {img.shape}. Expected (H, W, C) or (C, H, W)"
+                    )
             else:
-                raise ValueError(f"Invalid image dimensions: {img.ndim}. Expected 2 or 3 dimensions, got shape {img.shape}")
+                raise ValueError(
+                    f"Invalid image dimensions: {img.ndim}. Expected 2 or 3 dimensions, got shape {img.shape}"
+                )
 
             # Convert to PIL Image
             if img.dtype == np.uint8:
@@ -62,12 +83,16 @@ def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, ac
         processed_images.append(img)
 
     # Apply smart resize to images
-    resized_images = process_images(processed_images, image_factor, min_pixels, max_pixels)
+    resized_images = process_images(
+        processed_images, image_factor, min_pixels, max_pixels
+    )
 
     # Handle text prompt - format with vision tokens
     instruction = obs["prompt"]
-    formatted_text = format_text_with_vision_tokens(instruction, camera_key, predict_mode)
-    
+    formatted_text = format_text_with_vision_tokens(
+        instruction, camera_key, predict_mode
+    )
+
     # Use processor to prepare inputs
     inputs = preprocesser_call(
         processor=processor,
@@ -79,7 +104,7 @@ def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, ac
         return_tensors="pt",
         max_length=max_length,
     )
-    
+
     action_token_id = processor.tokenizer.convert_tokens_to_ids("<|action|>")
     moe_token_types = inputs.input_ids == action_token_id
     inputs["moe_token_types"] = moe_token_types
@@ -100,9 +125,7 @@ def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, ac
 
         # Pad to 20 dimensions if needed (same as training)
         if state.shape[-1] < 20:
-            padding = torch.zeros(
-                state.shape[0], state.shape[1], 20 - state.shape[-1]
-            )
+            padding = torch.zeros(state.shape[0], state.shape[1], 20 - state.shape[-1])
             state = torch.cat([state, padding], dim=-1)
 
         # Create mask for valid dimensions
@@ -121,15 +144,18 @@ def prepare_batch(obs: Dict, processor, camera_key: List[str], agent_pos_dim, ac
         if isinstance(inputs[key], torch.Tensor):
             inputs[key] = inputs[key].to(device)
 
-    dof_mask = torch.ones([state.shape[0] ,pred_horizon, fixed_action_dim])
-    dof_mask[:,:, action_dim:] = 0
-        
+    dof_mask = torch.ones([state.shape[0], pred_horizon, fixed_action_dim])
+    dof_mask[:, :, action_dim:] = 0
+
     inputs["dof_mask"] = dof_mask
 
     # Convert to BatchFeature to maintain consistency with training pipeline
     return BatchFeature(data=dict(inputs)).to(device)
 
-def process_images(images: List[Image.Image], image_factor: int, min_pixels: int, max_pixels: int) -> List[Image.Image]:
+
+def process_images(
+    images: List[Image.Image], image_factor: int, min_pixels: int, max_pixels: int
+) -> List[Image.Image]:
     """Process images with smart resize following the data loading pattern.
 
     Args:
@@ -156,6 +182,7 @@ def process_images(images: List[Image.Image], image_factor: int, min_pixels: int
 
     return resized_images
 
+
 def format_text_with_vision_tokens(
     instruction: str, camera_key: List[str], predict_mode: str = "fast"
 ) -> str:
@@ -177,7 +204,7 @@ def format_text_with_vision_tokens(
     propri_symbol = "<|propri|>"
     action_symbol = "<|action|>"
     # action_fast_symbol = "<|action_fast|>"
-    
+
     # Camera name mapping
     camera_name_mapping = {
         "front_view": "front view",
@@ -193,7 +220,7 @@ def format_text_with_vision_tokens(
     prologue = (
         f"{role_start_symbol}system\nYou are a helpful assistant.{role_end_symbol}\n"
     )
-    
+
     # User request with observation
     user_request = f"{role_start_symbol}user\nObservation:"
     if camera_key:
@@ -202,7 +229,9 @@ def format_text_with_vision_tokens(
             user_request += f" {view_name}: {vision_start_symbol}{image_pad_symbol}{vision_end_symbol}"
     user_request += "\nInstruction:"
 
-    text_prompt = f"\nPredict the next action in robot action.\nProprioception: {propri_symbol}\n"
+    text_prompt = (
+        f"\nPredict the next action in robot action.\nProprioception: {propri_symbol}\n"
+    )
     user_message = f"{user_request} {instruction}{text_prompt}{role_end_symbol}\n"
     assistant_output = f"{role_start_symbol}assistant\n"
     if predict_mode == "diffusion":

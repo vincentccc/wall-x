@@ -8,9 +8,12 @@ from typing import Dict, Any
 try:
     import msgpack
     import msgpack_numpy as m
+
     m.patch()
 except ImportError:
-    logging.warning("msgpack-numpy not installed. Install with: pip install msgpack-numpy")
+    logging.warning(
+        "msgpack-numpy not installed. Install with: pip install msgpack-numpy"
+    )
     msgpack = None
 
 import websockets.asyncio.server as _server
@@ -70,7 +73,7 @@ class WebsocketPolicyServer:
             compression=None,
             max_size=None,
             ping_interval=None,  # Disable automatic ping for long-running inference
-            ping_timeout=None,   # Disable ping timeout
+            ping_timeout=None,  # Disable ping timeout
             process_request=_health_check,
         ) as server:
             logger.info(f"Server started on {self._host}:{self._port}")
@@ -121,7 +124,9 @@ class WebsocketPolicyServer:
                 raise
 
 
-def _health_check(connection: _server.ServerConnection, request: _server.Request) -> _server.Response | None:
+def _health_check(
+    connection: _server.ServerConnection, request: _server.Request
+) -> _server.Response | None:
     if request.path == "/healthz":
         return connection.respond(http.HTTPStatus.OK, "OK\n")
     return None

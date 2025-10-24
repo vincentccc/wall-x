@@ -2,13 +2,10 @@ import logging
 from typing import Dict, Any, List
 import torch
 import numpy as np
-from PIL import Image
 from transformers import AutoProcessor
 
 from wall_x.serving.websocket_policy_server import BasePolicy
 from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import Qwen2_5_VLMoEForAction
-from wall_x.data.utils import preprocesser_call
-from qwen_vl_utils.vision_process import smart_resize
 from wall_x.serving.policy.utils import prepare_batch
 
 logger = logging.getLogger(__name__)
@@ -54,7 +51,9 @@ class WallXPolicy(BasePolicy):
         logger.info(f"Loading Wall-X model from {model_path}")
 
         self.model = Qwen2_5_VLMoEForAction.from_pretrained(
-            model_path, train_config=train_config, action_tokenizer_path=action_tokenizer_path
+            model_path,
+            train_config=train_config,
+            action_tokenizer_path=action_tokenizer_path,
         )
         self.model.eval()
         self.model = self.model.to(device)
@@ -63,7 +62,7 @@ class WallXPolicy(BasePolicy):
 
         # hard code the action dim to 20 for align to wall-x configuration
         self.fixed_action_dim = 20
-        
+
         self.action_dim = action_dim
         self.agent_pos_dim = agent_pos_dim
         self.pred_horizon = pred_horizon
@@ -87,7 +86,9 @@ class WallXPolicy(BasePolicy):
         self.action_buffer = []
         self.buffer_index = 0
 
-        logger.info(f"Model loaded successfully. Device: {device}, Action dim: {action_dim}, Horizon: {pred_horizon}")
+        logger.info(
+            f"Model loaded successfully. Device: {device}, Action dim: {action_dim}, Horizon: {pred_horizon}"
+        )
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -122,27 +123,51 @@ class WallXPolicy(BasePolicy):
         """
         try:
             # Need to predict new actions
-            input_batch = prepare_batch(obs, self.processor, self.camera_key, self.agent_pos_dim, self.action_dim, self.pred_horizon, self.fixed_action_dim, self.max_length, self.image_factor, self.min_pixels, self.max_pixels, self.predict_mode, self.device)
-            
+            input_batch = prepare_batch(
+                obs,
+                self.processor,
+                self.camera_key,
+                self.agent_pos_dim,
+                self.action_dim,
+                self.pred_horizon,
+                self.fixed_action_dim,
+                self.max_length,
+                self.image_factor,
+                self.min_pixels,
+                self.max_pixels,
+                self.predict_mode,
+                self.device,
+            )
+
             with torch.no_grad():
                 outputs = self.model(
                     **input_batch,
-                    action_dim=self.action_dim if self.predict_mode == "fast" else self.fixed_action_dim,
+                    action_dim=(
+                        self.action_dim
+                        if self.predict_mode == "fast"
+                        else self.fixed_action_dim
+                    ),
                     pred_horizon=self.pred_horizon,
                     mode="predict",
                     predict_mode=self.predict_mode,
                 )
 
             if outputs["predict_action"] is None:
-                predicted_actions = np.zeros([1, self.pred_horizon, self.action_dim]).astype(np.float32)
-                
-            
-            predicted_actions = outputs["predict_action"][:,:,:self.action_dim].detach().cpu().to(torch.float32).numpy()
+                predicted_actions = np.zeros(
+                    [1, self.pred_horizon, self.action_dim]
+                ).astype(np.float32)
+
+            predicted_actions = (
+                outputs["predict_action"][:, :, : self.action_dim]
+                .detach()
+                .cpu()
+                .to(torch.float32)
+                .numpy()
+            )
 
             print(predicted_actions.shape)
             return {"action": predicted_actions}
-        
-        
+
         except Exception as e:
             logger.error(f"Error during inference: {e}")
             raise

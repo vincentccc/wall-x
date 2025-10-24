@@ -156,7 +156,7 @@ obs = {
     # Image observations - keys must match server's camera_key configuration
     "front_view": np.ndarray,      # (H, W, 3) uint8 or float
     "left_wrist_view": np.ndarray, # (H, W, 3) uint8 or float
-    
+
     # Required fields
     "prompt": str,                 # Task description
     "dataset_names": List[str],    # Dataset/robot name, e.g., ["physical-intelligence/libero"]
