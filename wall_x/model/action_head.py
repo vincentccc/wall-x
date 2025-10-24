@@ -307,7 +307,7 @@ class ActionProcessor(nn.Module):
             torch.Tensor: Sampled timesteps of shape [batch_size]
         """
         sample = self.beta_dist.sample([batch_size]).to(device=device, dtype=dtype)
-        time = (self.s - sample) / self.s
+        time = (1 - sample) / self.s
         return time
 
     def proprioception_proj(
