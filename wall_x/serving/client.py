@@ -264,7 +264,6 @@ def main_sync(args):
     import matplotlib.pyplot as plt
     import os
 
-    save_dir = "/x2robot_v2/vincent/workspace/opensource/plots/libero"
     fig, axs = plt.subplots(
         args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True
     )
@@ -279,8 +278,8 @@ def main_sync(args):
 
     axs[-1].set_xlabel("Timestep")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, "lerobot_comparison_serving.png")
+    os.makedirs(args.save_dir, exist_ok=True)
+    save_path = os.path.join(args.save_dir, "lerobot_comparison_serving.png")
     plt.savefig(save_path)
     print(f"Saved plot to {save_path}")
     plt.close()
@@ -321,7 +320,6 @@ async def main(args):
     import matplotlib.pyplot as plt
     import os
 
-    save_dir = "/x2robot_v2/vincent/workspace/opensource/plots/libero"
     fig, axs = plt.subplots(
         args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True
     )
@@ -336,8 +334,8 @@ async def main(args):
 
     axs[-1].set_xlabel("Timestep")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, "lerobot_comparison_serving.png")
+    os.makedirs(args.save_dir, exist_ok=True)
+    save_path = os.path.join(args.save_dir, "lerobot_comparison_serving.png")
     plt.savefig(save_path)
     print(f"Saved plot to {save_path}")
     plt.close()
@@ -365,6 +363,9 @@ if __name__ == "__main__":
     parser.add_argument("--action_dim", type=int, default=7, help="Action dimension")
     parser.add_argument(
         "--config_path", default="/path/to/train/config", help="Train config path"
+    )
+    parser.add_argument(
+        "--save_dir", default="/path/to/save_dir", help="Save directory"
     )
     args = parser.parse_args()
 
