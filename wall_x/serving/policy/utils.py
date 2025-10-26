@@ -29,10 +29,12 @@ def prepare_batch(
 
     Args:
         obs: Dictionary containing:
-            - 'images': List of images or dict of named images
-            - 'image': Single image (alternative to 'images')
-            - 'prompt': Text prompt (optional)
-            - 'state': Robot state/proprioception (optional)
+            - 'camera_key_0' : image 0
+            - 'camera_key_1' : image 1
+            ...
+            - 'prompt': Text prompt
+            - 'state': Robot state/proprioception
+            - 'dataset_names': Dataset names
 
     Returns:
         BatchFeature object ready for model input
@@ -90,7 +92,7 @@ def prepare_batch(
     # Handle text prompt - format with vision tokens
     instruction = obs["prompt"]
     formatted_text = format_text_with_vision_tokens(
-        instruction, camera_key, predict_mode
+        instruction, camera_key, predict_mode, pred_horizon
     )
 
     # Use processor to prepare inputs
@@ -184,7 +186,10 @@ def process_images(
 
 
 def format_text_with_vision_tokens(
-    instruction: str, camera_key: List[str], predict_mode: str = "fast"
+    instruction: str,
+    camera_key: List[str],
+    predict_mode: str = "fast",
+    pred_horizon: int = 32,
 ) -> str:
     """Format text prompt with vision tokens for the model.
 
@@ -214,7 +219,7 @@ def format_text_with_vision_tokens(
         "top_view": "top view",
         "wall_view": "wall view",
     }
-    action_chunk_size = 32
+    pred_horizon = 32
 
     # System prologue
     prologue = (
@@ -235,7 +240,7 @@ def format_text_with_vision_tokens(
     user_message = f"{user_request} {instruction}{text_prompt}{role_end_symbol}\n"
     assistant_output = f"{role_start_symbol}assistant\n"
     if predict_mode == "diffusion":
-        assistant_output += f"{action_symbol * action_chunk_size}"
+        assistant_output += f"{action_symbol * pred_horizon}"
     complete_text = prologue + user_message + assistant_output
 
     return complete_text

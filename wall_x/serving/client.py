@@ -8,10 +8,20 @@ action predictions from observations in both sync and async contexts.
 
 import asyncio
 import logging
-from typing import Dict
+from typing import Dict, List
 import numpy as np
 import threading
 import yaml
+import torch
+import matplotlib.pyplot as plt
+import os
+
+from wall_x.model.action_head import Normalizer
+from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import (
+    Qwen2_5_VLMoEForAction,
+)
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from wall_x.utils.constant import action_statistic_dof
 
 try:
     import msgpack
@@ -35,7 +45,7 @@ logger = logging.getLogger(__name__)
 class WallXClient:
     """Client for connecting to Wall-X model server."""
 
-    def __init__(self, uri: str = "ws://localhost:8000"):
+    def __init__(self, config_path: str, uri: str = "ws://localhost:8000"):
         """Initialize client.
 
         Args:
@@ -46,6 +56,11 @@ class WallXClient:
         self.metadata = None
         self._loop = None
         self._thread = None
+
+        with open(config_path, "r") as f:
+            self.train_config = yaml.load(f, Loader=yaml.FullLoader)
+
+        self.init_normalizer(self.train_config)
 
     async def connect(self):
         """Connect to the server and receive metadata."""
@@ -122,9 +137,14 @@ class WallXClient:
         """Synchronously connect to server."""
         return self._run_async(self.connect())
 
-    def norm_state(self, state: np.ndarray) -> np.ndarray:
+    def norm_state(
+        self,
+        state: np.ndarray,
+        dataset_names: List[str],
+        state_mask: torch.Tensor = None,
+    ) -> np.ndarray:
         """Normalize state."""
-        return self.normalizer_propri.normalize_data(state, ["libero_action"])
+        return self.normalizer_propri.normalize_data(state, dataset_names, state_mask)
 
     def predict_sync(self, obs: Dict) -> Dict:
         """Synchronous prediction method.
@@ -145,11 +165,27 @@ class WallXClient:
             self._loop.call_soon_threadsafe(self._loop.stop)
         return result
 
+    def init_normalizer(self, train_config):
+        customized_dof_config = train_config["customized_robot_config"][
+            "customized_dof_config"
+        ]
+        customized_agent_pos_config = train_config["customized_robot_config"][
+            "customized_agent_pos_config"
+        ]
+        Qwen2_5_VLMoEForAction._set_customized_config(train_config)
 
-def prepare_batch_sync(data, normalizer_action, normalizer_propri, dataset_name):
+        self.normalizer_action = Normalizer(
+            action_statistic_dof, customized_dof_config
+        ).to("cuda")
+        self.normalizer_propri = Normalizer(
+            action_statistic_dof, customized_agent_pos_config
+        ).to("cuda")
+
+        print("Normalizer initialized")
+
+
+def prepare_batch_sync(data, normalizer_action, normalizer_propri, dataset_names):
     """Synchronous version of prepare_batch."""
-    import torch
-
     image = (data["image"].permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
     wrist_image = (
         (data["wrist_image"].permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
@@ -163,7 +199,7 @@ def prepare_batch_sync(data, normalizer_action, normalizer_propri, dataset_name)
     state_mask = torch.ones([1, 32, 20]).to("cuda")
     state_mask[:, :, 8:] = 0
 
-    state = normalizer_propri.normalize_data(state, [dataset_name], state_mask)
+    state = normalizer_propri.normalize_data(state, dataset_names, state_mask)
     state = state.cpu().numpy().astype(np.float32)
 
     obs = {
@@ -171,17 +207,12 @@ def prepare_batch_sync(data, normalizer_action, normalizer_propri, dataset_name)
         "left_wrist_view": wrist_image,
         "prompt": prompt,
         "state": state,
-        "dataset_names": [dataset_name],
+        "dataset_names": dataset_names,
     }
     return obs
 
 
 def init_serving_sample_dataset(train_config):
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-    from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import (
-        Qwen2_5_VLMoEForAction,
-    )
-
     repo_id = train_config["data"]["lerobot_config"]["repo_id"]
 
     meta_info = LeRobotDatasetMetadata(repo_id)
@@ -196,25 +227,7 @@ def init_serving_sample_dataset(train_config):
         video_backend="pyav",
     )
 
-    from wall_x.model.action_head import Normalizer
-    from wall_x.utils.constant import action_statistic_dof
-
-    customized_dof_config = train_config["customized_robot_config"][
-        "customized_dof_config"
-    ]
-    customized_agent_pos_config = train_config["customized_robot_config"][
-        "customized_agent_pos_config"
-    ]
-    Qwen2_5_VLMoEForAction._set_customized_config(train_config)
-
-    normalizer_action = Normalizer(action_statistic_dof, customized_dof_config).to(
-        "cuda"
-    )
-    normalizer_propri = Normalizer(
-        action_statistic_dof, customized_agent_pos_config
-    ).to("cuda")
-
-    return dataset, normalizer_action, normalizer_propri
+    return dataset, repo_id
 
 
 # ============ Synchronous version of main function ============
@@ -224,17 +237,10 @@ def main_sync(args):
     """Synchronous version of main function."""
 
     # Create client and connect
-    client = WallXClient(uri=args.uri)
+    client = WallXClient(args.config_path, uri=args.uri)
     client.connect_sync()
 
-    config_path = args.config_path
-    with open(config_path, "r") as f:
-        train_config = yaml.load(f, Loader=yaml.FullLoader)
-        train_config["data"]["model_type"] = train_config.get("model_type")
-
-    dataset, normalizer_action, normalizer_propri = init_serving_sample_dataset(
-        train_config
-    )
+    dataset, repo_id = init_serving_sample_dataset(client.train_config)
 
     total_frames = len(dataset)
     gt_traj = np.zeros((total_frames, args.action_dim))
@@ -250,9 +256,9 @@ def main_sync(args):
             print(f"Processing frame {idx}")
             obs = prepare_batch_sync(
                 data,
-                normalizer_action,
-                normalizer_propri,
-                dataset_name="physical-intelligence/libero",
+                client.normalizer_action,
+                client.normalizer_propri,
+                dataset_names=[repo_id],
             )
             response = client.predict_sync(obs)
             pred_action = response["action"]
@@ -261,9 +267,6 @@ def main_sync(args):
 
     # Draw plot
     timesteps = gt_traj.shape[0]
-    import matplotlib.pyplot as plt
-    import os
-
     fig, axs = plt.subplots(
         args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True
     )
@@ -292,15 +295,9 @@ def main_sync(args):
 
 
 async def main(args):
-    client = WallXClient(uri=args.uri)
+    client = WallXClient(args.config_path, uri=args.uri)
     await client.connect()
-
-    config_path = args.config_path
-    with open(config_path, "r") as f:
-        train_config = yaml.load(f, Loader=yaml.FullLoader)
-    dataset, normalizer_action, normalizer_propri = init_serving_sample_dataset(
-        train_config
-    )
+    dataset, repo_id = init_serving_sample_dataset(client.train_config)
 
     total_frames = len(dataset)
     gt_traj = np.zeros((total_frames, args.action_dim))
@@ -309,7 +306,12 @@ async def main(args):
     for idx, data in enumerate(dataset):
         if idx % args.pred_horizon == 0 and idx + args.pred_horizon < total_frames:
             print(f"Processing frame {idx}")
-            obs = prepare_batch_sync(data, normalizer_action, normalizer_propri)
+            obs = prepare_batch_sync(
+                data,
+                client.normalizer_action,
+                client.normalizer_propri,
+                dataset_names=[repo_id],
+            )
             response = await client.predict(obs)
             pred_action = response["action"]
             print(pred_action.shape)
@@ -317,8 +319,6 @@ async def main(args):
             gt_traj[idx : idx + args.pred_horizon] = data["actions"]
 
     timesteps = gt_traj.shape[0]
-    import matplotlib.pyplot as plt
-    import os
 
     fig, axs = plt.subplots(
         args.action_dim, 1, figsize=(15, 5 * args.action_dim), sharex=True
@@ -362,10 +362,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--action_dim", type=int, default=7, help="Action dimension")
     parser.add_argument(
-        "--config_path", default="/path/to/train/config", help="Train config path"
+        "--config_path",
+        default="/x2robot_v2/vincent/workspace/opensource/cfg/config_from_qwen_libero.yml",
+        help="Train config path",
     )
     parser.add_argument(
-        "--save_dir", default="/path/to/save_dir", help="Save directory"
+        "--save_dir",
+        default="/x2robot_v2/vincent/workspace/opensource/plots/libero",
+        help="Save directory",
     )
     args = parser.parse_args()
 

@@ -51,6 +51,20 @@ Ensure that the sum of the configuration dimensions corresponds to the values sp
     "state_eef_with_gripper": 7
 ```
 
+## Using Lerobot Dataset
+- Each dataset employs distinct keys; please specify the corresponding key mappings as described in `wall-x/wall_x/data/utils.py`.
+```python
+"lerobot/aloha_mobile_cabinet": {
+      "camera": {
+          "observation.images.cam_high": "face_view",
+          "observation.images.cam_left_wrist": "left_wrist_view",
+          "observation.images.cam_right_wrist": "right_wrist_view",
+      },
+      "state": "observation.state",
+      "action": "action",
+  }
+```
+
 ## Compute stats
 ```bash
     python wall-x/scripts/compute_norm_stats.py
@@ -117,6 +131,8 @@ Keep `agent_pos_config` consistent with `dof_config`.
     accelerate merge-weights /path/to/sharded_tensors /path/to/model.safetensors
     # copy the saved processor files
     cp /path/to/saved_processor_dir/* /path/to/model.safetensors
+
+    # In earlier versions of PyTorch, errors may occur. You can use our provided script to address this issue; refer to wall-x/scripts/merge_sharded_weights.py for details.
 ```
 
 ## Memory Usage
