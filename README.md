@@ -130,6 +130,10 @@ To move the red block in the plate with same color, what should you do next? Thi
 To move the red block in the plate with the same color, you should first locate the red block. It is currently positioned on the table, not in the plate. Then, you should carefully grasp the red block using your fingers. Next, you should use your hand to lift the red block from the table and place it into the plate that is also red in color. Ensure that the red block is securely placed in the plate without slipping or falling.
 ```
 
+## Join Our Community
+- Scan the QR code on WeChat to join the discussion group, where you can engage in in-depth exchanges with community developers and the official team.
+![QR Code](assets/QRcode_community.jpg)
+
 ## 📚 Cite Us
 
 If you find WALL-OSS models useful, please cite:
