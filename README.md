@@ -132,7 +132,7 @@ To move the red block in the plate with the same color, you should first locate 
 
 ## Join Our Community
 - Scan the QR code on WeChat to join the discussion group, where you can engage in in-depth exchanges with community developers and the official team.
-![QR Code](assets/QRcode_community.jpg)
+<img src="assets/QRcode_community.jpg" alt="QR Code" width="400">
 
 ## 📚 Cite Us
 
