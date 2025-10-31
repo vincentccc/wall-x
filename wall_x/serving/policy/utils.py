@@ -1,11 +1,12 @@
-from typing import Dict, List
+from typing import Dict, List, Any, Optional
 import logging
 import numpy as np
-from wall_x.data.utils import preprocesser_call
+from wall_x.data.utils import KEY_MAPPINGS, preprocesser_call
 from qwen_vl_utils.vision_process import smart_resize
 import torch
 from PIL import Image
 from transformers import BatchFeature
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,37 @@ def prepare_batch(
     # Convert to BatchFeature to maintain consistency with training pipeline
     return BatchFeature(data=dict(inputs)).to(device)
 
+@torch.no_grad()
+def do_normalize(data, normalizer, dataset_name, fixed_dim=20):
+    origin_dim = data.shape[-1]
+    batch_size = data.shape[0]
+    import os
+    assert origin_dim <= fixed_dim, f"Data dimension {origin_dim} is greater than fixed dimension {fixed_dim}"
+    # if isinstance(data, np.ndarray):
+    #     data = torch.from_numpy(data).float()
+    # elif not isinstance(data, torch.Tensor):
+    #     data = torch.tensor(data, dtype=torch.float32)
+
+    # Add batch dimension if needed
+    if data.dim() == 1:
+        data = data.unsqueeze(0)
+    if data.dim() == 2:
+        data = data.unsqueeze(1)  # [batch, 1, state_dim]
+
+    # Pad to 20 dimensions if needed (same as training)
+    if data.shape[-1] < fixed_dim:
+        padding = torch.zeros(data.shape[0], data.shape[1], fixed_dim - data.shape[-1]).to(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+        data = torch.cat([data, padding], dim=-1).to(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+
+    # Create mask for valid dimensions
+    # device = next(normalizer.parameters()).device
+
+    mask = torch.ones_like(data).to(f"cuda:{int(os.environ['LOCAL_RANK'])}")
+    mask[:, :, origin_dim:] = 0
+    
+    data = normalizer.normalize_data(data, [dataset_name] * batch_size)
+
+    return data, mask
 
 def process_images(
     images: List[Image.Image], image_factor: int, min_pixels: int, max_pixels: int
@@ -184,6 +216,249 @@ def process_images(
 
     return resized_images
 
+def preprocess(dataset_name, data, image_factor, min_pixels, max_pixels, target_size, generate_subtask_ratio, pred_horizon, priority_order, cam_mapping, model_type):
+    key_mapping = KEY_MAPPINGS.get(dataset_name, None)
+    assert key_mapping is not None, f"{dataset_name} not found in KEY_MAPPINGS"
+    camera_key = key_mapping["camera"].keys()
+
+    h, w, resize_h, resize_w = None, None , None, None
+    for key in camera_key:
+        current_obs = data[key].clone().permute(1, 2, 0)
+        image_inputs, h, w, resize_h, resize_w = vision_preprocess(current_obs, image_factor, min_pixels, max_pixels, target_size)
+        image_inputs.append(image_inputs)
+    
+    agent_pos = data[key_mapping["state"]]
+    action = data[key_mapping["action"]]
+    frame_index = data["frame_index"]
+    instruction_info = {"instruction": data["task"]}
+    processed_text = process_text(instruction_info, frame_index, pred_horizon, h, w, resize_h, resize_w, model_type, priority_order, cam_mapping, generate_subtask_ratio)
+    result = {
+            "image_inputs": image_inputs,
+            "text": processed_text,
+            "action": action,
+            "agent_pos": agent_pos,
+            "frame_index": frame_index,
+        }
+    return result
+
+
+def vision_preprocess(current_obs: torch.Tensor, image_factor: int, 
+                      min_pixels: int, max_pixels: int, 
+                      target_size):
+    processed_frames = []
+    img_pil = Image.fromarray((current_obs * 255).to(torch.uint8).cpu().numpy())
+    orig_width, orig_height = img_pil.size
+    # 2. Apply resolution constraints (if config is not -1)
+    if target_size != -1:
+        # Maintain aspect ratio logic
+        if orig_width > orig_height:  # Landscape image
+            new_width = target_size
+            new_height = int(target_size * orig_height / orig_width)
+        else:  # Portrait image
+            new_height = target_size
+            new_width = int(target_size * orig_width / orig_height)
+        img_pil = img_pil.resize((new_width, new_height))
+
+    # 3. Apply smart scaling (qwen logic)
+    current_width, current_height = img_pil.size
+    resized_height, resized_width = smart_resize(
+        current_height,
+        current_width,  
+        factor=image_factor,
+        min_pixels=min_pixels,
+        max_pixels=max_pixels,
+    )
+    resized_img = img_pil.resize((resized_width, resized_height))
+    processed_frames.append(resized_img)
+
+    return processed_frames, orig_height, orig_width, resized_height, resized_width
+
+def vision_preprocess_batched(current_obs: torch.Tensor, image_factor: int, 
+                      min_pixels: int, max_pixels: int, 
+                      target_size=-1):
+    from qwen_vl_utils.vision_process import smart_resize
+
+    # current_obs: [B, C, H, W]
+    if current_obs.dtype != torch.uint8:
+        current_obs = (current_obs * 255).to(torch.uint8)
+    
+    orig_height, orig_width = current_obs.shape[-2:]
+    
+    # 2. Apply resolution constraints (if config is not -1)
+    if target_size != -1:
+        # Maintain aspect ratio logic
+        if orig_width > orig_height:  # Landscape image
+            new_width = target_size
+            new_height = int(target_size * orig_height / orig_width)
+        else:  # Portrait image
+            new_height = target_size
+            new_width = int(target_size * orig_width / orig_height)
+        
+        # torch resize: input [C, H, W], output [C, new_H, new_W]
+        current_obs = torch.nn.functional.interpolate(
+            current_obs.float(),  
+            size=(new_height, new_width),
+            mode='bicubic',
+            align_corners=False
+        )
+
+    # 3. Apply smart scaling (qwen logic)
+    current_height, current_width = current_obs.shape[-2:]
+    resized_height, resized_width = smart_resize(
+        current_height,
+        current_width,  
+        factor=image_factor,
+        min_pixels=min_pixels,
+        max_pixels=max_pixels,
+    )
+    
+    current_obs = torch.nn.functional.interpolate(
+        current_obs.float(),
+        size=(resized_height, resized_width),
+        mode='bicubic',
+        align_corners=False
+    )
+    return current_obs, orig_height, orig_width, resized_height, resized_width
+
+
+
+def process_text(instruction_info: Dict[str, Any], 
+                 frame_index: int,
+                 pred_horizon: int,
+                 orig_height: int,
+                 orig_width: int,
+                 resized_height: int,
+                 resized_width: int,
+                 model_type: str,
+                 priority_order: Optional[OrderedDict] = None, 
+                 cam_mapping: Optional[Dict[str, str]] = None, 
+                 generate_subtask_ratio: float = 0.0) -> str:
+    from wall_x.data.utils import get_wallx_normal_text, process_grounding_points
+    complete_text, generate_subtask = get_wallx_normal_text(
+        instruction_info,
+        pred_horizon,
+        frame_index,
+        priority_order,
+        cam_mapping,
+        generate_subtask_ratio=generate_subtask_ratio,
+    )
+    text = process_grounding_points(
+            complete_text, orig_height, orig_width, resized_height, resized_width, model_type
+    )
+    
+    return text
+
+
+def data_preprocess(batch, max_length, normalizer_action, normalizer_propri, dataset_names, processor, action_tokenizer=None):
+    additional_inputs = {}
+    for key in batch[0].keys():
+        if key == "agent_pos":
+            agent_pos = torch.stack([item["agent_pos"] for item in batch])
+            if agent_pos.dim() == 2:
+                agent_pos = agent_pos.unsqueeze(1)
+            agent_pos_mask = (~torch.isnan(agent_pos)).float()
+            agent_pos.nan_to_num_(nan=0.0)
+            if agent_pos.shape[-1] != 20:
+                agent_pos = torch.cat(
+                    [
+                        agent_pos,
+                        torch.zeros(
+                            agent_pos.shape[0],
+                            agent_pos.shape[1],
+                            20 - agent_pos.shape[-1],
+                        ),
+                    ],
+                    dim=-1,
+                )
+                agent_pos_mask = torch.cat(
+                    [
+                        agent_pos_mask,
+                        torch.zeros(
+                            agent_pos_mask.shape[0],
+                            agent_pos_mask.shape[1],
+                            20 - agent_pos_mask.shape[-1],
+                        ),
+                    ],
+                    dim=-1,
+                )
+            agent_pos = normalizer_propri.normalize_data(agent_pos, dataset_names, agent_pos_mask)
+            additional_inputs["proprioception"] = agent_pos
+            additional_inputs["agent_pos_mask"] = agent_pos_mask
+        elif key == "action":
+            action = torch.stack([item["action"] for item in batch])
+            if action.dim() == 2:
+                action = action.unsqueeze(1)
+            dof_mask = (~torch.isnan(action)).float()
+            action.nan_to_num_(nan=0.0)
+            if action.shape[-1] != 20:
+                action = torch.cat(
+                    [
+                        action,
+                        torch.zeros(
+                            action.shape[0], action.shape[1], 20 - action.shape[-1]
+                        ),
+                    ],
+                    dim=-1,
+                )
+                dof_mask = torch.cat(
+                    [
+                        dof_mask,
+                        torch.zeros(
+                            dof_mask.shape[0],
+                            dof_mask.shape[1],
+                            20 - dof_mask.shape[-1],
+                        ),
+                    ],
+                    dim=-1,
+                )
+            action = normalizer_action.normalize_data(action, dataset_names, dof_mask)
+            additional_inputs["action_chunk"] = action
+            additional_inputs["dof_mask"] = dof_mask
+        elif key == "image_inputs":
+            additional_inputs["image_inputs"] = [
+                item["image_inputs"] for item in batch
+            ]
+        elif key == "text":
+            additional_inputs["text"] = [item["text"] for item in batch]
+        elif key == "frame_index":
+            additional_inputs["frame_index"] = torch.stack(
+                [item["frame_index"] for item in batch]
+            )
+        else:
+            raise NotImplementedError(
+                f"{key} input not implemented in preprocesser"
+            )
+
+        from wall_x.data.utils import replace_action_token
+        additional_inputs["text"] = replace_action_token(
+            additional_inputs["text"],
+            additional_inputs["action_chunk"],
+            action_tokenizer,
+            dataset_names,
+            additional_inputs["dof_mask"],
+        )
+
+        inputs = preprocesser_call(
+            processor=processor,
+            text=additional_inputs.pop("text"),
+            images=additional_inputs.pop("image_inputs"),
+            videos=None,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+            max_length=max_length,
+        )
+
+        action_token_id = processor.tokenizer.convert_tokens_to_ids("<|action|>")
+
+        # Gating token types
+        additional_inputs["moe_token_types"] = inputs.input_ids == action_token_id
+
+        inputs.update(additional_inputs)
+
+        inputs["dataset_names"] = dataset_names
+        
+        return inputs
 
 def format_text_with_vision_tokens(
     instruction: str,

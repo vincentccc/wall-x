@@ -1268,6 +1268,10 @@ class Qwen2_5_VLMoEForAction(Qwen2_5_VLForConditionalGeneration):
         dataset_names: Optional[str] = None,
         dof_mask: Optional[torch.FloatTensor] = None,
         agent_pos_mask: Optional[torch.FloatTensor] = None,
+        is_compute_log_prob: Optional[bool] = False,
+        chains_pre = None,
+        chains_next = None,
+        denoise_inds = None,
         **kwargs,
     ) -> Union[Tuple, Qwen2_5_VLACausalLMOutputWithPast]:
         """
@@ -1571,10 +1575,47 @@ class Qwen2_5_VLMoEForAction(Qwen2_5_VLForConditionalGeneration):
                 )
                 channel_loss_dict["action_accuracy"] = action_accuracy
 
+        action_mask = input_ids == self.action_token_id_set["action_token_id"]
+        action_hidden_states = hidden_states[action_mask]
+        if is_compute_log_prob:
+            import random
+            v_t = self.action_preprocessor.action_proj_back(action_hidden_states)
+            noisy_action = chains_pre
+            times = torch.linspace(
+                0,
+                1,
+                10, # step hardcode
+                device=inputs_embeds.device,
+                dtype=inputs_embeds.dtype,
+            )
+            t = times[denoise_inds[0]]
+            dt = times[denoise_inds[0] + 1] - times[denoise_inds[0]]
+            batch_size = noisy_action.shape[0]
+            v_t = v_t.reshape(batch_size, -1, v_t.shape[-1])
+            t = t.repeat(batch_size, 1, 1)
+            dt = dt.repeat(batch_size, 1, 1)
+            # t = t[:, None, None].expand_as(noisy_action)
+            # dt = dt[:, None, None].expand_as(noisy_action)
+            x0 = noisy_action.to(torch.float32) - t.to(torch.float32) * v_t.to(torch.float32)
+            x1 = noisy_action.to(torch.float32) + (torch.ones([batch_size, 1, 1], device=noisy_action.device) - t.to(torch.float32)) * v_t.to(torch.float32)
+            x1_weight = t.to(torch.float32) + dt.to(torch.float32)
+            flip_t = torch.ones([batch_size, 1, 1], device=noisy_action.device) - t
+            if flip_t[0] == 1:
+                inv = 1 / dt
+            else:
+                inv = 1 / (1 - flip_t)
+            sigma = torch.sqrt(flip_t * inv)
+            shift = sigma ** 2 * dt / (2 * flip_t)
+            x0_weight = torch.ones([batch_size, 1, 1], device=noisy_action.device) - (t.to(torch.float32) + dt.to(torch.float32)) - shift
+            x_t_std = torch.sqrt(dt) * sigma
+            noisy_action = x0_weight * x0 + x1_weight * x1
+            value = torch.zeros((noisy_action.shape[0]), device=noisy_action.device)
+            log_probs = self.get_logprob_norm(chains_next, noisy_action, x_t_std)
+            return log_probs, value
+
         if action_chunk is not None:
             action_mask = input_ids == self.action_token_id_set["action_token_id"]
             if action_mask.any():
-                action_hidden_states = hidden_states[action_mask]
                 flow = flow.reshape(-1, flow.shape[-1])
                 _flow_loss = self.action_preprocessor.flow_loss(
                     action_hidden_states, flow, dof_mask
@@ -1657,6 +1698,7 @@ class Qwen2_5_VLMoEForAction(Qwen2_5_VLForConditionalGeneration):
         dof_mask: Optional[torch.FloatTensor] = None,
         agent_pos_mask: Optional[torch.FloatTensor] = None,
         re_generate: bool = False,
+        is_train: bool = False,
         **kwargs,
     ):
         """
@@ -2050,9 +2092,95 @@ class Qwen2_5_VLMoEForAction(Qwen2_5_VLForConditionalGeneration):
                 device=inputs_embeds.device,
                 dtype=inputs_embeds.dtype,
             )
-            action_trajectory = odeint(step, noisy_action, times, method="euler")
+    
+            def _sample_one_step(noisy_action, time, delta, is_train=False):
+                batch_size = noisy_action.shape[0]
 
-            # Extract final predicted action and unnormalize
+                # flow don't use value
+                value = torch.zeros((batch_size), device=noisy_action.device)
+                
+                dt = delta.repeat(batch_size).reshape(-1, 1, 1)
+                v_t = step(time, noisy_action.to(torch.bfloat16)).to(torch.float32)
+
+                t = time.repeat(batch_size).reshape(-1, 1, 1)
+                x0 = noisy_action.to(torch.float32) - t.to(torch.float32) * v_t.to(torch.float32)
+                x1 = noisy_action.to(torch.float32) + (torch.ones([batch_size, 1, 1], device=noisy_action.device) - t.to(torch.float32)) * v_t.to(torch.float32)
+                x1_weight = t.to(torch.float32) + dt.to(torch.float32)
+                
+                x_t_std = None
+                if not is_train:
+                    x0_weight = torch.ones([batch_size, 1, 1], device=noisy_action.device) - (t.to(torch.float32) + dt.to(torch.float32))
+                    x_t_std = torch.zeros_like(t.to(torch.float32))
+                else:
+                    flip_t = torch.ones([batch_size, 1, 1], device=noisy_action.device) - t
+                    if flip_t[0] == 1:
+                        inv = 1 / dt
+                    else:
+                        inv = 1 / (1 - flip_t)
+                    sigma = torch.sqrt(flip_t * inv)
+                    shift = sigma ** 2 * dt / (2 * flip_t)
+                    x0_weight = torch.ones([batch_size, 1, 1], device=noisy_action.device) - (t.to(torch.float32) + dt.to(torch.float32)) - shift
+                    x_t_std = torch.sqrt(dt) * sigma
+                noisy_action = x0_weight * x0 + x1_weight * x1
+                sample = torch.normal(
+                    mean=0.0,
+                    std=1.0,
+                    size=noisy_action.shape,
+                    dtype=torch.float32,
+                    device=noisy_action.device,
+                )
+                noisy_action_with_sample = noisy_action + sample * x_t_std
+                log_prob = self.get_logprob_norm(noisy_action_with_sample, noisy_action, x_t_std)
+                
+                return noisy_action_with_sample, log_prob, value
+            
+            def _sample_action_trajectory(noisy_action, times, is_train=False):
+                import random
+                action_trajectory = []
+                values = []
+                chains = []
+                log_probs = []
+                batch_size = noisy_action.shape[0]
+                if is_train:
+                    denoise_inds = torch.tensor([random.randint(0, len(times) - 1)] * batch_size)
+                else:
+                    denoise_inds = torch.tensor([-1] * batch_size)
+                        
+                for idx in range(len(times)-1):
+                    t = times[idx]
+                    dt = times[idx + 1] - times[idx]
+                    noisy_action, log_prob, value = _sample_one_step(noisy_action, t, dt, is_train=bool(idx==denoise_inds[0]))
+                    
+                    # v_t = step(t, noisy_action.to(torch.bfloat16)).to(torch.float32)
+                    
+                    # x0 = noisy_action.to(torch.float32) - t.to(torch.float32) * v_t.to(torch.float32)
+                    # x1 = noisy_action.to(torch.float32) + (1 - t.to(torch.float32)) * v_t.to(torch.float32)
+                    # x0_weight = 1 - (t.to(torch.float32) + dt.to(torch.float32))
+                    # x1_weight = t.to(torch.float32) + dt.to(torch.float32)
+                    # noisy_action = x0_weight * x0 + x1_weight * x1
+                    
+                    log_probs.append(log_prob)
+                    chains.append(noisy_action)
+                    values.append(value)
+                    action_trajectory.append(noisy_action)
+                return action_trajectory, values, chains, log_probs, denoise_inds
+            
+            action_trajectory, values, chains, log_probs, denoise_inds = _sample_action_trajectory(noisy_action, times, is_train)
+            
+            chains = torch.stack(chains, dim=1)
+            log_probs = torch.stack(log_probs, dim=1)[
+                :, :,  : 32, : 7
+            ]
+            values = torch.stack(values, dim=1)
+            output.update({
+                "actions": action_trajectory[-1],
+                "chains": chains,
+                "prev_logprobs": log_probs,
+                "prev_values": values,
+                "denoise_inds": denoise_inds,
+            })
+            
+            # Extract final predicted action and unnormalized
             predict_action = action_trajectory[-1]
             predict_action = (
                 self.action_preprocessor.normalizer_action.unnormalize_data(
@@ -2070,6 +2198,19 @@ class Qwen2_5_VLMoEForAction(Qwen2_5_VLForConditionalGeneration):
                 )
 
         return output
+
+    def get_logprob_norm(self, sample, mu, sigma):
+        if torch.sum(torch.abs(sigma)) == 0:
+            return torch.zeros_like(sample)
+        sigma_safe = torch.where(sigma == 0, torch.ones_like(sigma), sigma)
+        constant_term = -torch.log(sigma) - 0.5 * torch.log(
+            2 * torch.pi * torch.ones_like(sample)
+        )
+        exponent_term = -0.5 * torch.pow((sample - mu) / sigma_safe, 2)
+        log_prob = constant_term + exponent_term
+        log_prob = torch.where(sigma == 0, torch.zeros_like(log_prob), log_prob)
+        return log_prob
+
 
     def forward(
         self, mode: Optional[str] = None, predict_mode: Optional[str] = "text", **kwargs
