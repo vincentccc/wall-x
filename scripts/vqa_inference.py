@@ -21,8 +21,12 @@ class VQAWrapper(object):
     def _load_processor(self, model_path: str) -> AutoProcessor:
         return AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
-    def _load_model(self, model_path: str, train_config: dict) -> Qwen2_5_VLMoEForAction:
-        model = Qwen2_5_VLMoEForAction.from_pretrained(model_path, train_config=train_config)
+    def _load_model(
+        self, model_path: str, train_config: dict
+    ) -> Qwen2_5_VLMoEForAction:
+        model = Qwen2_5_VLMoEForAction.from_pretrained(
+            model_path, train_config=train_config
+        )
         if self.device == "cuda":
             model = model.to(self.device, dtype=torch.bfloat16)
         else:
@@ -69,7 +73,9 @@ if __name__ == "__main__":
     train_config_path = "/path/to/config.yaml"
     with open(train_config_path, "r") as f:
         train_config = yaml.load(f, Loader=yaml.FullLoader)
-    wrapper = VQAWrapper(model_path=MODEL_PATH_FOR_MODULE_TEST, train_config=train_config)
+    wrapper = VQAWrapper(
+        model_path=MODEL_PATH_FOR_MODULE_TEST, train_config=train_config
+    )
 
     try:
         test_question = "To move the red block in the plate with same color, what should you do next? Think step by step."
