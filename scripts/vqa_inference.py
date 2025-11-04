@@ -1,15 +1,16 @@
 import torch
 from PIL import Image
 from transformers import AutoProcessor
+import yaml
 
 from wall_x.model.qwen2_5_based.modeling_qwen2_5_vl_act import Qwen2_5_VLMoEForAction
 
 
 class VQAWrapper(object):
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, train_config: dict):
         self.device = self._setup_device()
         self.processor = self._load_processor(model_path)
-        self.model = self._load_model(model_path)
+        self.model = self._load_model(model_path, train_config)
 
     def _setup_device(self) -> str:
         if torch.cuda.is_available():
@@ -20,8 +21,8 @@ class VQAWrapper(object):
     def _load_processor(self, model_path: str) -> AutoProcessor:
         return AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
-    def _load_model(self, model_path: str) -> Qwen2_5_VLMoEForAction:
-        model = Qwen2_5_VLMoEForAction.from_pretrained(model_path)
+    def _load_model(self, model_path: str, train_config: dict) -> Qwen2_5_VLMoEForAction:
+        model = Qwen2_5_VLMoEForAction.from_pretrained(model_path, train_config=train_config)
         if self.device == "cuda":
             model = model.to(self.device, dtype=torch.bfloat16)
         else:
@@ -65,7 +66,10 @@ class VQAWrapper(object):
 
 if __name__ == "__main__":
     MODEL_PATH_FOR_MODULE_TEST = "/path/to/model"
-    wrapper = VQAWrapper(model_path=MODEL_PATH_FOR_MODULE_TEST)
+    train_config_path = "/path/to/config.yaml"
+    with open(train_config_path, "r") as f:
+        train_config = yaml.load(f, Loader=yaml.FullLoader)
+    wrapper = VQAWrapper(model_path=MODEL_PATH_FOR_MODULE_TEST, train_config=train_config)
 
     try:
         test_question = "To move the red block in the plate with same color, what should you do next? Think step by step."
