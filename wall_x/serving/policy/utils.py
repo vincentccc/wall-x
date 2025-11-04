@@ -219,7 +219,6 @@ def format_text_with_vision_tokens(
         "top_view": "top view",
         "wall_view": "wall view",
     }
-    pred_horizon = 32
 
     # System prologue
     prologue = (
